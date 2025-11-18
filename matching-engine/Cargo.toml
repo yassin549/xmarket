@@ -1,0 +1,70 @@
+[package]
+name = "matching-engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# gRPC and Protobuf
+tonic = "0.11"
+tonic-build = "0.11"
+prost = "0.12"
+prost-types = "0.12"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# S3-compatible storage
+aws-sdk-s3 = "1.0"
+aws-config = "1.0"
+
+
+# Atomic operations and concurrency
+crossbeam = "0.8"
+parking_lot = "0.12"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Decimal for precise financial calculations
+rust_decimal = { version = "1.33", features = ["serde-with-str"] }
+
+# Checksum for WAL
+crc32fast = "1.3"
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1.4"
+
+[[bin]]
+name = "matching-engine"
+path = "src/main.rs"
+
+[[bin]]
+name = "replay-tool"
+path = "src/bin/replay_tool.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+

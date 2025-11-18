@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "matching-engine.fullname" . }}
+  labels:
+    {{- include "matching-engine.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "matching-engine.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "matching-engine.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+      - name: matching-engine
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: grpc
+          containerPort: 50051
+          protocol: TCP
+        env:
+        - name: WAL_PATH
+          value: {{ .Values.env.WAL_PATH | quote }}
+        - name: SNAPSHOT_DIR
+          value: {{ .Values.env.SNAPSHOT_DIR | quote }}
+        - name: LISTEN_ADDR
+          value: {{ .Values.env.LISTEN_ADDR | quote }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      {{- if .Values.persistence.enabled }}
+      - name: data
+        persistentVolumeClaim:
+          claimName: {{ include "matching-engine.fullname" . }}-pvc
+      {{- else }}
+      - name: data
+        emptyDir: {}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

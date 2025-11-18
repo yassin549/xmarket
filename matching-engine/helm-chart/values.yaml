@@ -1,0 +1,43 @@
+replicaCount: 2
+
+image:
+  repository: matching-engine
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 50051
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 1000m
+    memory: 1Gi
+
+env:
+  WAL_PATH: "/data/wal.log"
+  SNAPSHOT_DIR: "/data/snapshots"
+  LISTEN_ADDR: "0.0.0.0:50051"
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - matching-engine
+        topologyKey: kubernetes.io/hostname
+
