@@ -1,0 +1,156 @@
+# 1) Data ingestion & scraping (top priority)
+
+* **Respect robots.txt & rate limits**
+
+  * Always check `robots.txt` before scraping a domain and implement `crawl-delay`.
+  * Default polite retry/backoff: `Retry-After` use, exponential backoff up to 5 retries.
+* **Use RSS when available** (prefer RSS over scraping HTML).
+* **User-Agent & headers** — set a clear UA like `EverythingMarketBot/0.1 (+mailto:your@domain)` and include `From` header where allowed.
+* **Throttle per domain** — at most 1 request per domain per 30s by default; configurable per source in `sources.yaml`.
+* **Playwright only as fallback** — minimize Playwright use (heavy; large image). Prefer `newspaper3k` → Playwright only when needed.
+* **ETag / If-Modified-Since** — use caching headers to avoid re-downloading unchanged articles.
+
+---
+
+# 2) Deduplication & similarity (critical for clean signals)
+
+* **Exact thresholds (do not change silently):**
+
+  * Semantic duplicate threshold: **cosine similarity > 0.88** → treat as duplicate and drop.
+  * Grouping/clustering threshold for LLM summarization: **>= 0.78** similarity to group related docs.
+* **Sliding window size:** keep vectors only for **6 hours** by default (evict older vectors). Configurable.
+* **Vector normalization:** embedding vectors **must be normalized** before cosine/FAISS queries. Ensure dtype `float32`.
+* **Batch embeddings:** embed items in batches for speed (don’t call model per doc). Cache embeddings for identical texts during runtime.
+
+---
+
+# 3) Quick scorer & event weighting (deterministic and auditable)
+
+* **Exact scoring formula and constants (must match plan):**
+
+  * `quick_score` composition: `0.4*sentiment + 0.3*keyword_score + 0.3*ner_relevance` → clamp `[-1,1]`.
+  * `event_weight = source_trust * (1 + log(1 + num_related_docs)) * exp(-age_seconds/tau)` with `tau = 48*3600` (48 hours).
+  * Convert to points: `event_points = event_weight * quick_score * 100`.
+  * Cap per-event delta: `delta_cap = ±20` points.
+  * EWMA smoothing: `alpha = 0.25`.
+  * LLM trigger: `|quick_score| >= 0.45` OR `num_independent_sources >= 2`.
+  * Minimum independent sources for big moves: `MIN_INDEP_SOURCES = 2`.
+* **All timestamps in UTC** — normalize and store ISO8601 UTC everywhere.
+
+---
+
+# 4) LLM usage & cost control
+
+* **Mode family:** `heuristic` (default for demo), `local` (llama.cpp), `api` (Gemini/OpenAI).
+* **Rate limiting:** `LLM_CALLS_PER_HOUR` env var (default **10**). Implement token-bucket enforcement globally across workers.
+* **Selective calls only:** run LLM **only** for groups that meet the threshold — do not call per-article.
+* **Persist LLM input + output** (small audit), not raw web pages — retain `{event_id, sources[], summary, impact, llm_mode, timestamp}`.
+* **Sandbox outputs:** numeric `impact_points` must be a numeric in a bounded range (e.g., `[-100,100]`) and documented. LLM responses must be parsed with a strict JSON schema and validated.
+
+---
+
+# 5) Reality Engine correctness & safety
+
+* **Atomic updates:** apply `apply_event` under DB transaction when persisting scores + change logs to avoid partial state.
+* **Audit trail:** every large change (|delta| > `SUSPICIOUS_DELTA = 15`) must create an `llm_audit` row and set score state to `pending_review`. Do not broadcast final reality update until approved.
+* **Cap single source influence:** max single-source daily cap default **20 points** — implement per-source counters and reset rolling 24h window.
+* **Confidence metric:** compute and expose confidence: `confidence = min(1.0, log(1 + num_independent_sources) * avg_source_trust)` — store with score.
+
+---
+
+# 6) Orderbook & price normalization
+
+* **Price scale agreement:** decide and document whether MarketPrice is `0..1` or `0..100`. **Plan uses 0..100** for blending. If orderbook uses currency, implement deterministic mapping to `0..100` per stock and document mapping formula (e.g., `norm = clamp((price - min_price)/(max_price - min_price) * 100, 0,100)`; but for MVP assume orders directly use 0..100).
+* **Matching rules:** price-time priority, FIFO in same price level; partial fills allowed.
+* **Trade events:** produce deterministic trade IDs (UUID4), timestamps in UTC, and log each trade to `trade_history` table for audit.
+
+---
+
+# 7) Security, secrets, and admin flow
+
+* **Admin endpoints protected** by `X-ADMIN-KEY` header; store key in env `ADMIN_API_KEY`. Validate constant-time compare. Log admin actions with `admin_id`.
+* **Do not commit secrets** anywhere. CI must not echo secrets. Use Railway secrets or GH Secrets for CI if necessary.
+* **Input validation:** strictly validate payloads for orders, simulate endpoints, and admin endpoints. Use Pydantic schemas in FastAPI.
+
+---
+
+# 8) Data retention & privacy
+
+* **Minimal persistence policy:** persist only LLM summaries + small audit logs + last scores. Keep raw scraped HTML ephemeral (in memory only). If you must store raw texts, document retention window and encryption at rest.
+* **Snapshot exports** must redact source PII where needed. Document privacy policy before public demo.
+
+---
+
+# 9) Reliability & performance engineering
+
+* **Model loading:** load embedding & LLM models **once per process**, share across threads/requests. Don’t reinitialize per request.
+* **Batching:** batch embeddings (e.g., 16–64) where possible.
+* **Async I/O:** use async HTTP / async DB libs where feasible; pollers can run in asyncio loops.
+* **Worker design:** separate processes for `api` and `scraper-worker`. `api` should not perform heavy LLM calls synchronously — route such calls to background worker or queue. On Railway, configure separate services.
+* **Memory caps:** keep FAISS index size bounded; evict oldest vectors past window (6h). Monitor memory.
+* **Logging & observability:** structured JSON logs at INFO/ERROR levels; log LLM call counts, rate-limiter hits, events processed/hour, and CPU/memory.
+
+---
+
+# 10) Testing & reproducibility (must be enforced)
+
+* **Unit tests for all core pieces:** embed, vector index, quick scorer, reality engine (apply_event), orderbook matching, blending. Tests must be **deterministic** and must set seeds if randomness used.
+* **Integration tests:** end-to-end local test: poller -> embedding -> quick_score -> LLM (heuristic) -> reality update -> broadcast -> orderbook blending. Add a CI test that runs a minimal scenario.
+* **PR requirement:** do not merge to `dev`/`main` without passing CI tests. Antigravity agents must open PRs and run tests automatically.
+
+---
+
+# 11) Legal & ToS checks
+
+* **Flag risky sources** such as paywalled content, social networks (X) — prefer API access or avoid for MVP.
+* **Add a legal comment** in repo `docs/legal.md` describing ToS compliance for each source and note that scraping may be prohibited for certain domains. Antigravity must add this file when creating scrapers.
+
+---
+
+# 12) Deployment & cost controls
+
+* **LLM_MODE default:** `heuristic` on Railway for demo to avoid cloud LLM costs. Document how to switch to `local` or `api`.
+* **Env var controls:** `LLM_CALLS_PER_HOUR`, `POLL_INTERVAL`, `MAX_LLM_PER_EVENT`, `VECTOR_WINDOW_SECONDS` — make these top-level env vars and read in config for runtime tuning.
+* **Monitoring of usage:** send alerts/logging for LLM calls/hour, CPU spikes, rejected scraper requests (403/429) — add a simple `alerts` webhook or email.
+
+---
+
+# 13) Developer/Agent workflow details (how Antigravity should operate)
+
+* **One change per PR**: ensure each agent run implements a single milestone/feature and opens a PR to `dev`. Title/description must follow commit conventions.
+* **Run tests locally in the agent** before opening PR (CI will be backup).
+* **Create README updates and docs** alongside code (every PR that adds behavior must add / update docs/plan.md accordingly).
+* **Idempotency:** scrapers and poller work must be idempotent — running twice should not double-count events. Use `make_id(url,published)` and DB unique constraints.
+* **Migration scripts:** whenever models/tables are added, include an Alembic migration or SQL scripts and keep schema version in `docs/` and `migrations/`.
+
+---
+
+# 14) Concrete quick checklist for Antigravity before committing a scraper/LMM/reality change
+
+1. Did you add/verify `sources.yaml` entry (with `trust` and `crawl_delay`)?
+2. Did you implement robots.txt check for that domain?
+3. Did you add unit tests for new behavior?
+4. Did you run `pytest` locally?
+5. Did you confirm embeddings are normalized and dedupe threshold applied?
+6. Did you confirm LLM calls are guarded by `LLM_CALLS_PER_HOUR` and `LLM_MODE`?
+7. Did you persist only allowed audit fields (no raw scraped full-text storage unless necessary)?
+8. Did you add docs/plan.md update for the change?
+9. Did you open PR to `dev` and include test evidence in PR description?
+
+---
+
+### Small final tip
+
+Add these constants (exact) to a single `config/constants.py` and import them everywhere — this prevents drift:
+
+```py
+SIMILARITY_DUPLICATE = 0.88
+SIMILARITY_GROUP = 0.78
+LLM_QUICK_THRESHOLD = 0.45
+VECTOR_WINDOW_SECONDS = 6*3600
+TAU_SECONDS = 48*3600
+DELTA_CAP = 20
+EWMA_ALPHA = 0.25
+MIN_INDEP_SOURCES = 2
+LLM_CALLS_PER_HOUR = 10
+```

@@ -1,0 +1,295 @@
+# 1. High‑level concept
+
+You are building an "Everything Market": a platform where *anything* (people, trends, risks, outcomes) can be traded as an asset. Each asset has two separate price engines:
+
+* **Reality Engine (objective):** computes a Reality Score (0–100) based on measurable, external signals and oracles.
+* **Market Engine (subjective):** classic orderbook-based price coming from buyer/seller supply and demand.
+* **Final/Displayed Price:** a blend of the two (weighted combination) presented to users. The platform shows all three values: Reality Score, Market Price, Final Price.
+
+Goal: reduce pure-sentiment noise by anchoring tradable assets to objective, auditable, and anti-manipulation reality signals.
+
+---
+
+# 2. Chosen approach & major design decisions
+
+1. **Two-layer price system** (Reality + Market) and blend into Final Price. Show all three to users for transparency.
+2. **Reality Engine** architecture: streaming pipeline that ingests a curated set of sources, filters/embeds items, runs cheap scorers, calls LLMs selectively for top events, aggregates weighted impacts, applies decay and smoothing, enforces anti-manipulation rules, and publishes RealityScore updates.
+3. **MVP goals & constraints:** Build cheaply (free-tier/service) and preferably on Railway for hosting. Avoid storing full archives; operate as a real-time/ephemeral pipeline with a sliding vector window. Persist only LLM summaries/major events + last RealityScores for audit.
+4. **Antigravity**: you plan to use Antigravity as your IDE/agent platform for scaffolding, development, and orchestration. Antigravity can run local editors and coordinate cloud model calls; still heavy model work will be cloud-backed.
+
+---
+
+# 3. MVP tech stack (recommended)
+
+## Frontend
+
+* **React (Vite)** for SPA dashboard.
+* **Charting:** Chart.js, or a TradingView embeddable if you want a more professional look for charts. Keep it lightweight for MVP.
+
+## Backend / Pipeline (MVP, low-cost)
+
+* **Language:** Python 3.11
+* **Scraping / Feeds:** `feedparser`, `newspaper3k`, `Scrapy`, `Playwright` (only for JS-heavy pages). Start with RSS where available. Use Scrapy for domain-specific spiders.
+* **NLP & Embeddings:** `sentence-transformers` (all‑MiniLM‑L6‑v2) for embeddings; `spaCy` + `VADER` or simple heuristics for NER & sentiment.
+* **Vector Index:** FAISS (in-memory) for small-scale dedupe and similarity; keep a sliding window of recent vectors.
+* **LLM summarizer:** For MVP use local open-source inference (llama.cpp / small GGUF models or Mistral/Vicuna if you can host). Limit LLM calls to top events. Later you can use hosted Gemini/OpenAI if you need quality and scale.
+* **Orderbook / Matching Engine:** small open-source Python limit orderbook repo or custom simple engine (price-time priority, partial fills).
+* **API & Realtime:** FastAPI + WebSockets (Uvicorn) to stream RealityScore, MarketPrice, FinalPrice to frontend.
+* **DB / Persistence:** Railway Postgres for minimal persistence (LLM summaries, last RealityScores, config). Redis optional for queueing.
+
+## Hosting & DevOps
+
+* **Host:** Railway (free tier) for workers, Postgres, optional Redis. Antigravity for local development & agentic automation.
+* **Containerization:** Dockerfile for reproducibility (Playwright included only if necessary).
+
+---
+
+# 4. Data pipeline & components (detailed)
+
+1. **Sources config (`sources.yaml`)**: list of sources with `id`, `type` (rss/scrape/api), `url`, `weight`, `trust_score`.
+
+2. **Poller / Scraper** (every 3–10 min): read RSS and scrape fallback pages. Extract title, text, timestamp, url. Respect robots.txt and throttle requests.
+
+3. **Pre-filtering**: language detection, mention/NER check for target assets, keyword heuristics. Drop irrelevant items early.
+
+4. **Embed & dedupe**: compute `all-MiniLM` embedding for each article. Compare against a sliding, in-memory vector index (FAISS or simple cosine list). Dedupe near-duplicates (similarity threshold e.g., 0.88).
+
+5. **Quick Scorer** (cheap): run sentiment heuristics (VADER or simple token checks), NER relevance, keyword flags, source trust and independent-source count. Produce `quick_score` ∈ [-1,1].
+
+6. **LLM aggregator (selective)**: call only when `|quick_score|` exceeds threshold or multiple independent sources report the same event. LLM outputs: short summary, numeric impact (e.g., ±X points over Y hours), and rationale. For MVP you may use a placeholder numeric impact derived from `quick_score * trust` if you want zero-cost.
+
+7. **Scoring engine**: convert event impacts into RealityPoints and update the per-stock Reality Score applying decay, caps, and EWMA smoothing. Keep audit logs for LLM calls only.
+
+8. **Orderbook engine**: handle limit/market orders, matching, trade events, best bid/ask. Compute MarketPrice (normalized 0..100 if needed).
+
+9. **Final blending**: compute `FinalPrice = market_weight * MarketPrice + reality_weight * RealityScore` (both normalized). We suggested starting weights `market=0.6`, `reality=0.4` but these are tunable and can be dynamic.
+
+10. **Publish** via WebSocket/REST to frontend.
+
+---
+
+# 5. Concrete algorithms, constants & thresholds (MVP defaults)
+
+## Quick Scorer (example formula)
+
+```
+quick_score = clamp(
+  w_sentiment * sentiment_score +
+  w_ner * entity_relevance +
+  w_keywords * keyword_flag +
+  w_sources * min(1, sqrt(num_indep_sources)/2),
+ -1, 1)
+```
+
+Example weights: `w_sentiment=0.4`, `w_ner=0.25`, `w_keywords=0.2`, `w_sources=0.15`.
+
+## Event weighting
+
+```
+event_weight = source_trust * (1 + log(1 + num_related_docs)) * recency_factor
+recency_factor = exp(-(now - event_time)/tau)
+```
+
+Suggested `tau = 48 hours` for news recency.
+
+## Convert to RealityPoints
+
+```
+event_points = event_weight * quick_score * 100
+```
+
+## Apply update to Reality Score
+
+* Cap single-event delta to `delta_cap = ±20 points`.
+* Smoothing with EWMA: `final_score = alpha * new_score + (1-alpha) * prev_score`, alpha ~0.25.
+* Clamp final score to `[0, 100]`.
+
+## LLM trigger & thresholds
+
+* `LLM_THRESHOLD` (quick_score magnitude) = 0.4–0.45.
+* Also trigger LLM when `>= 2` independent sources or aggregated quick_score > threshold.
+
+## Anti-manipulation rules (MVP)
+
+* Require `min_independent_sources = 2` for any event that changes RealityScore by > X points.
+* `max_single_source_influence_per_day = 20%` of max_daily_move.
+* Use EWMA smoothing (alpha = 0.25) to prevent spike exploitation.
+* Flag >X point changes for human review in the UI (pending state) — recommended for demo.
+
+---
+
+# 6. Anti-manipulation & audit
+
+* Use `sources.yaml` trust scores to downweight tabloids and fringe blogs.
+* Limit how much one domain can move a score in a day.
+* Require multiple independent sources for big moves.
+* Persist only LLM summaries + source URLs + numeric impacts for auditability (tiny DB footprint).
+* Keep an audit trail that includes the LLM reasoning so investors can review decisions.
+
+---
+
+# 7. Starter tech & open-source tools recommended
+
+**Scraping & ingestion**
+
+* `feedparser` (RSS)
+* `newspaper3k` (article extraction)
+* `Scrapy` (spiders & pipelines)
+* `Playwright` (JS-heavy fallbacks)
+* `Pushshift` or `psaw` for Reddit
+
+**NLP & embeddings**
+
+* `sentence-transformers` / `all-MiniLM-L6-v2` (embeddings)
+* `spaCy` (NER)
+* `VADER` (sentiment) or simple heuristics
+
+**Vector & dedupe**
+
+* `FAISS` (in-memory) or Chroma/Weaviate later
+
+**LLM & summarization**
+
+* `llama.cpp` (local inference) for zero-cost summarization (limited quality)
+* Later: Gemini (Antigravity uses Gemini 3 Pro), OpenAI or hosted models for quality
+
+**Orderbook / matching**
+
+* small open-source Python limit-order-book projects or write simple engine
+
+**Runtime & deployment**
+
+* Railway (Postgres + Redis optional) for hosting & easy free tier
+* Docker for packaging
+
+---
+
+# 8. Railway deployment & operational notes (MVP)
+
+* Use Railway services for: `scraper-worker` (background worker or scheduled job), `api` (FastAPI + WebSockets), Postgres add-on (persist audit), optional Redis.
+* Railway envs: `DATABASE_URL`, `POLL_INTERVAL`, any API keys.
+* Use scheduled tasks or a continuous worker with `time.sleep(POLL_INTERVAL)`.
+* Keep Playwright usage minimal (large image & CPU). Prefer RSS + `newspaper3k` where possible.
+* Limit LLM calls (top N events per hour/day). Persist LLM outputs only.
+
+---
+
+# 9. Data retention strategy (keep it cheap)
+
+* **Ephemeral vectors:** keep a sliding window of recent vectors for dedupe (e.g., 6–24 hours). Evict older vectors.
+* **Persist only LLM summaries & audit items:** store `id, url, title, published, source_id, summary, impact, created_at` in Postgres (very small footprint).
+* **Store last RealityScore for continuity:** tiny JSON or a small table in Postgres.
+
+This enables a low‑cost MVP and protects you from large DB bills and complexity.
+
+---
+
+# 10. Milestones & incremental plan (concrete)
+
+**Milestone 0 — Repo + infra**
+
+* Create repo, Dockerfile, `sources.yaml`, README, Railway project.
+
+**Milestone 1 — Scraper + prefilter + embed pipeline**
+
+* Implement poller reading RSS + `newspaper3k` extraction. Embed with `all-MiniLM` and in-memory dedupe (FAISS or list).
+
+**Milestone 2 — Quick scorer + grouping**
+
+* Implement `quick_score` heuristics, vector clustering, and candidate events.
+
+**Milestone 3 — LLM summarizer + reality points**
+
+* Integrate `llama.cpp` for summaries or keep heuristics for MVP. Implement `apply_event` to update RealityScore.
+
+**Milestone 4 — Orderbook engine & blending**
+
+* Implement basic limit order book and blending function.
+
+**Milestone 5 — API + frontend demo**
+
+* FastAPI + WebSocket feed, React demo UI: show RealityScore, MarketPrice, FinalPrice, top events.
+
+**Milestone 6 — Anti-manipulation & audit**
+
+* Implement manipulation rules, require multi-source confirmation for big moves, show LLM rationale and links in UI.
+
+**Milestone 7 — Polish for investor demo**
+
+* Demo script: simulate one or two real events and show the flow: scrape → quick score → LLM summary → reality update → market reaction.
+
+---
+
+# 11. Starter repo skeleton (files to create)
+
+* `sources.yaml`
+* `scraper/poller.py` (RSS fetch + newspaper3k + dedupe)
+* `scraper/scraper_utils.py` (playwright fallback & helper functions)
+* `nlp/embed.py` (embedding wrapper)
+* `nlp/filters.py` (NER & sentiment helpers)
+* `store/index.py` (in-memory FAISS wrapper)
+* `scoring/quick_scorer.py`
+* `scoring/reality_engine.py`
+* `matching/orderbook.py`
+* `api/server.py` (FastAPI with websocket)
+* `frontend/` (React Vite app)
+* `Dockerfile` & `requirements.txt`
+
+I previously provided a minimal `poller.py`, `scraper_utils.py` and `Dockerfile` example which you can paste into the repo as a working starting point.
+
+---
+
+# 12. Example code snippets & pseudocode included in our convo
+
+We discussed several code snippets and pseudocode: the polling loop, quick scorer, vector dedupe flow, LLM call conditions, and scoring update pseudocode. Keep those snippets handy when implementing the files above (they were provided in the chat earlier).
+
+---
+
+# 13. Scraper engine options recap
+
+* **Scrapy:** the recommended, robust framework for spiders per domain; extendable pipelines and middlewares.
+* **newspaper3k:** easy article extraction for many mainstream news sites.
+* **Playwright:** use only for JS-heavy fallbacks.
+* **Fundus:** a news-specific extractor if you want better-quality article extraction.
+* **AutoScraper / XPath Agent:** experimental/ML tools for auto-generating extractors — useful as accelerators but can be fragile.
+
+Recommendation: use Scrapy + `newspaper3k` first; Playwright only as fallback.
+
+---
+
+# 14. Recommended starter sources (AI Risk Index MVP)
+
+* ArXiv (AI / CS RSS) — research signals
+* Hacker News — technical community reaction
+* r/MachineLearning (Pushshift) — research & developer sentiment
+* The Verge / Wired / NYTimes tech RSS — mainstream tech news
+* LLMarena / specialized forums — niche community signals
+
+Suggested weights: ArXiv 0.2, HN 0.2, Reddit 0.2, mainstream 0.25, forums 0.15.
+
+---
+
+# 15. Next actions & options I can produce for you right now
+
+Choose one and I will generate it immediately (copy/paste ready):
+
+A. Full starter repo skeleton with minimal implementations (`poller.py`, `embed.py`, `quick_scorer.py`, `reality_engine.py`, `orderbook.py`, `api/server.py`).
+
+B. Exact Antigravity agent prompts to scaffold & implement Milestones 1–4 automatically.
+
+C. Detailed `scoring/reality_engine.py` (production-ready with constants, unit tests, and tuning notes).
+
+D. React demo UI skeleton (Vite + Charts + WebSocket hookup).
+
+E. `sources.yaml` with 8 recommended sources + trust weights for the AI Risk index.
+
+Tell me which one to produce now (A/B/C/D/E) and I’ll generate it immediately.
+
+---
+
+# 16. Final notes & advice
+
+* Start small. Use 5–10 trusted sources and limit LLM calls. Focus on a single index (AI Risk) as your MVP demo.
+* Be transparent with users/investors: show RealityScore, MarketPrice, FinalPrice, and the LLM rationale + links.
+* Prioritize anti-manipulation and auditability — this is your product’s differentiator.
+* Use Antigravity to accelerate development (agentic workflows), Railway for hosting (free tier), and local open-source LLMs for zero-cost summarization during early demos.

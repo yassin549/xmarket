@@ -1,0 +1,753 @@
+
+# Prompt 1 — Repo bootstrap (exact, non-ambiguous)
+
+**Title:** `bootstrap/repo-structure`
+
+**Objective:** Create the GitHub repository scaffold for `everything-market` with dev workflows, Dockerfile, requirements, and frontend skeleton.
+
+**Branch:** `feature/bootstrap-repo` (create from `dev`)
+
+**Files to create (exact paths):**
+
+* `README.md` (short overview)
+* `LICENSE` (MIT)
+* `.gitignore` (Python, Node, .env)
+* `docs/plan.md` (paste the current plan document content)
+* `backend/requirements.txt` (use the exact dependency list below)
+* `backend/Dockerfile` (exact Dockerfile provided in docs)
+* `frontend/` (initialize Vite React app structure: run vite init then add deps)
+* `.github/workflows/ci.yml` with the CI YAML provided in the plan
+* `infra/docker-compose.yml` (create a simple compose that runs api + worker + postgres)
+
+**Exact content to place in `backend/requirements.txt`:**
+
+```
+fastapi==0.95.2
+uvicorn[standard]==0.22.0
+feedparser==6.0.10
+newspaper3k==0.2.8
+playwright==1.40.0
+sentence-transformers==2.2.2
+spacy==3.5.4
+psycopg2-binary==2.9.7
+sqlalchemy==2.0.18
+python-dotenv==1.0.0
+faiss-cpu==1.7.4
+pytest==7.4.0
+```
+
+**Exact `backend/Dockerfile`:** use the Dockerfile from `docs/plan.md` (copy-paste).
+
+**Commands to run locally (exact):**
+
+1. `git clone git@github.com:<YOUR_GITHUB_USERNAME>/everything-market.git`
+2. `cd everything-market`
+3. `git checkout -b dev`
+4. Create all files above with the provided contents.
+5. Frontend scaffold:
+
+   ```bash
+   cd frontend
+   npm init vite@latest . --template react
+   npm install
+   npm install chart.js react-chartjs-2
+   cd ..
+   ```
+6. Commit and push:
+
+   ```bash
+   git add .
+   git commit -m "chore(repo): bootstrap repo structure"
+   git push --set-upstream origin feature/bootstrap-repo
+   ```
+7. Open a PR `feature/bootstrap-repo` -> `dev`.
+
+**Tests (CI):**
+
+* CI will run pytest from `backend`. There are no tests yet; the workflow should pass install step.
+
+**Acceptance criteria (must pass for this prompt):**
+
+* PR exists on GitHub from `feature/bootstrap-repo` to `dev`.
+* Frontend dev server runs: `cd frontend && npm run dev` (it should show Vite dev page).
+* Dockerfile builds without missing dependency errors: `docker build -t em-backend ./backend` completes locally.
+
+---
+
+# Prompt 2 — Scraper & Poller (exact, runnable)
+
+**Title:** `feature/scraper`
+
+**Objective:** Implement the RSS + article extraction pipeline. Candidate events must be persisted into DB (SQLite default or Postgres via `DATABASE_URL`).
+
+**Branch:** `feature/scraper` (from `dev`)
+
+**Files to create (exact paths & behaviors):**
+
+* `backend/app/models.py` — copy the exact snippet from docs/plan.md (defines Event and Score models).
+* `backend/app/scraper/sources.yaml` — exact example (see plan) listing 5 sources with `id/type/url/trust`.
+* `backend/app/scraper/scraper_utils.py` — copy the file provided in docs (RSS fetch, newspaper extraction, Playwright fallback, make_id).
+* `backend/app/scraper/poller.py` — copy the minimal poller from docs and make these explicit changes:
+
+  * It must read `DATABASE_URL` from env; if not present fallback to `sqlite:///./data.db`.
+  * It must import `Event` and `Base` from `app.models` and ensure tables are created.
+  * Poll interval read from `POLL_INTERVAL` env (default 300).
+  * It must dedupe by `make_id(url,published)` and store `RECENT_IDS` in memory.
+  * **Robustness**: It must handle `IntegrityError` (or check DB) to avoid crashing if an event exists in DB but not in memory (restart case).
+  * For each accepted article, compute an embedding using `SentenceTransformer('all-MiniLM-L6-v2')` (embed call allowed) and store only the minimal event row with `summary='placeholder'` and `impact=0` for now.
+* `backend/app/scraper/__init__.py` — empty
+
+**Environment variables required for local run:**
+
+* `DATABASE_URL` (optional)
+* `POLL_INTERVAL` (optional)
+
+**Unit tests to add:**
+
+* `backend/tests/test_scraper_utils.py`:
+
+  * Test `fetch_rss_items` returns a non-empty list for the arXiv RSS (mock the HTTP response).
+  * Test `make_id` produces deterministic hash.
+* `backend/tests/test_poller_dedupe.py`:
+
+  * Simulate two RSS entries with same URL/published; poller should insert only one event.
+
+**Exact Run commands:**
+
+1. From project root:
+
+   ```bash
+   cd backend
+   source .venv/bin/activate
+   pytest -q
+   # run poller
+   python -m app.scraper.poller
+   ```
+
+**LLM agent instruction (if running in Antigravity):**
+
+```
+Implement models.py, scraper_utils.py and poller.py exactly as specified. Ensure poller persists events to DB using the Event model and handles duplicates robustly. Add the pytest tests as outlined. Commit to branch feature/scraper with message "feat(scraper): rss poller + article extract".
+```
+
+**Acceptance criteria:**
+
+* `pytest` passes for tests above.
+* Running `python -m app.scraper.poller` logs items and inserts rows into `events` table.
+* If `DATABASE_URL` is unset, `sqlite:///./data.db` file is created and populated.
+
+---
+
+# Prompt 3 — Embeddings, Vector Index, Quick Scorer
+
+**Title:** `feature/embeddings`
+
+**Objective:** Implement embedding wrapper, in-memory FAISS index with eviction, and the cheap quick scorer function. Integrate with poller: skip storing events that are duplicates by semantic similarity > 0.88.
+
+**Branch:** `feature/embeddings` (from `dev`)
+
+**Files to create / modify (exact):**
+
+* `backend/app/nlp/embed.py`
+
+  * Function `def embed_text(text: str) -> np.ndarray` that loads SentenceTransformer("all-MiniLM-L6-v2") once and returns normalized numpy vector (dtype float32).
+  * Include a small cache in-memory for same texts during runtime.
+* `backend/app/index/vector_index.py`
+
+  * FAISS index wrapper with API:
+
+    * `init_index(dim=384)`
+    * `add_vector(id: str, vector: np.ndarray, ts: float)`
+    * `query_vector(vector: np.ndarray, k=4) -> list[(id,score)]` (cosine sim or inner product normalized)
+    * `evict_older_than(seconds: int)`
+    * Use in-memory dict to store ts mapping for eviction.
+* `backend/app/nlp/quick_scorer.py`
+
+  * Function `quick_score(text: str, target_tokens: List[str]=None, source_trust: float=0.5, num_sources:int=1) -> float` returning float in [-1,1].
+  * Use spaCy's `en_core_web_sm` to extract entities; keyword list `["fail","bankrupt","lawsuit","acquit","profit","record","attack","exploit"]` with weighting as in plan.
+  * Compose score: `0.4*sentiment + 0.3*keyword_score + 0.3*ner_relevance` (clamp [-1,1]).
+* Modify `backend/app/scraper/poller.py`:
+
+  * After extracting article text, call `embed_text`, call `vector_index.query_vector`, if best score > 0.88 skip insertion (considered duplicate).
+  * If not duplicate, compute quick_score and set `impact = quick_score * src['trust'] * 10` and insert event with that impact value.
+
+**Unit tests to add:**
+
+* `backend/tests/test_embeddings.py`:
+
+  * embed_text returns 384-d vector and normalized magnitude ~1.
+* `backend/tests/test_vector_index.py`:
+
+  * add two similar vectors and ensure query returns near similarity > 0.88.
+* `backend/tests/test_quick_scorer.py`:
+
+  * texts with keywords return negative score magnitude; entity match raises ner_relevance.
+
+**Exact commands to run:**
+
+```bash
+cd backend
+pytest backend/tests/test_embeddings.py::test_embed_shape -q
+pytest -q
+```
+
+**LLM agent instruction:**
+
+```
+Create embed.py, vector_index.py, quick_scorer.py. Integrate into poller so duplicates by semantic similarity (>0.88) are deduped. Add unit tests. Commit to feature/embeddings.
+```
+
+**Acceptance criteria:**
+
+* Unit tests pass.
+* Poller now avoids inserting semantically duplicate events.
+* Quick scorer outputs values in [-1,1] with reasonable polarity on test cases.
+
+---
+
+# Prompt 4 — Reality Engine (apply_event + persistence + API)
+
+**Title:** `feature/reality-engine`
+
+**Objective:** Implement the Reality Engine core (apply_event, decay, smoothing, persistence) and a simple API to fetch current score and confidence for a stock.
+
+**Branch:** `feature/reality-engine` (from `dev`)
+
+**Files to create / modify (exact):**
+
+* `backend/app/scoring/reality_engine.py`
+
+  * Implement:
+
+    * `class RealityEngine:` singleton or service that stores per-stock state in memory and persists to DB.
+    * `def apply_event(stock_id: str, event_points: float, source_id: str, timestamp: datetime, num_related_docs:int=1) -> new_score`:
+      * First, read current score and `last_updated`.
+      * Apply **Lazy Decay**: `score = score * exp(-(now - last_updated) / tau)`.
+      * Then apply new event impact and update `last_updated = now`.
+    * `def get_score(stock_id: str) -> dict`:
+      * Read score from DB.
+      * Apply **Lazy Decay** (in-memory only) to return the effective score at `now` without writing to DB.
+    * `def decay_scores(now: datetime)`: (Optional background job).
+  * Use constants: `tau_seconds = 48*3600`, `delta_cap = 20`, `alpha = 0.25`.
+  * Implementation detail: compute `event_weight = source_trust * (1 + log(1 + num_related_docs)) * exp(-(now - timestamp).total_seconds()/tau_seconds)` (source_trust from sources.yaml).
+  * `event_points = event_weight * event_points`? (Make explicit: event_points passed in should be quick_score * 100; multiply by event_weight then cap.)
+* `backend/app/models.py` (SQLAlchemy)
+
+  * Table `scores` with columns `(stock_id PK, score float, confidence float, last_updated datetime)`.
+* `backend/app/api/routes.py`
+
+  * Add endpoint `GET /api/v1/stocks/{stock_id}/reality` that returns the `get_score` payload.
+* Wire reality_engine to persist to `scores` table.
+
+**Unit tests:**
+
+* `backend/tests/test_reality_engine.py`:
+
+  * Test applying a positive and negative event updates score and respects `delta_cap`.
+  * Test smoothing: apply two sequential events and verify final_score uses EWMA alpha=0.25.
+
+**Run steps:**
+
+```bash
+cd backend
+pytest backend/tests/test_reality_engine.py -q
+uvicorn app.main:app --reload --port 8000
+# Test API:
+curl http://127.0.0.1:8000/api/v1/stocks/elon/reality
+```
+
+**LLM agent instruction:**
+
+```
+Implement RealityEngine with apply_event (using Lazy Decay), get_score (using Lazy Decay), and persistence. Persist scores to DB. Expose GET /api/v1/stocks/{stock_id}/reality. Add unit tests. Commit to feature/reality-engine.
+```
+
+**Acceptance criteria:**
+
+* Tests pass for reality engine behavior.
+* API endpoint returns JSON: `{"stock_id":"elon","score":72.4,"confidence":0.68,"last_updated":"..."}`
+* Applying events via unit tests updates DB `scores` row.
+
+---
+
+# Prompt 5 — Selective LLM client (local / api / heuristic)
+
+**Title:** `feature/llm-client`
+
+**Objective:** Implement `llm_client.py` supporting three modes: `local` (calls llama.cpp binary), `api` (calls a remote HTTP endpoint with API key), and `heuristic` fallback. Include rate limiting and integration with poller: call only when `abs(quick_score) >= 0.45` OR `num_independent_sources >= 2`.
+
+**Branch:** `feature/llm-client` (from `dev`)
+
+**Files to create / modify:**
+
+* `backend/app/nlp/llm_client.py` with functions:
+
+  * `def summarize_group(group_docs: List[dict]) -> dict` returning `{summary: str, impact_points: float, rationale: str}`
+  * Mode selection via env var `LLM_MODE` (values: `local`, `api`, `heuristic`). Default `heuristic`.
+  * Rate limiter using token bucket: env `LLM_CALLS_PER_HOUR` default `10`.
+  * If `local`: run subprocess `./llama.cpp -m <model> ...` (provide clear command placeholder) and parse textual output into JSON (ask Antigravity to place the binary path in env during dev).
+  * If `api`: POST input to `LLM_API_URL` with header `Authorization: Bearer <LLM_API_KEY>` and parse returned JSON (specify expected fields).
+  * If `heuristic`: extract top 3 sentences from combined docs (simple sentence splitter), compute `impact_points = mean(quick_scores)*10*mean(source_trust)` and return as summary/rationale.
+* Modify `backend/app/scraper/poller.py` to:
+
+  * Integrate with poller using **Batch-based Clustering**:
+    * For each batch of articles, query `vector_index` (k=5, window=6h).
+    * If `similarity > 0.78`, mark as related to existing event and increment `num_related_docs`.
+    * If no match, create new event.
+    * **Trigger LLM**: Only for "Hot Events" where `num_related_docs >= 2` OR `|quick_score| >= 0.45`.
+  * Call `summarize_group` for hot events and store returned `impact_points` and `summary` into `events` DB row(s).
+* Add logging and an `llm_calls` table (timestamp, mode, input_hash) to track usage.
+
+**Unit tests to add:**
+
+* `backend/tests/test_llm_client.py`:
+
+  * Test `heuristic` mode: given two docs, returns summary string and impact_points numeric.
+  * Test rate limiter: simulate >LLM_CALLS_PER_HOUR and assert calls are blocked.
+
+**Env vars required:**
+
+* `LLM_MODE` (local|api|heuristic)
+* `LLM_CALLS_PER_HOUR` (integer)
+* If `api`: `LLM_API_URL`, `LLM_API_KEY`
+
+**LLM agent instruction:**
+
+```
+Implement llm_client with local/api/heuristic modes. Add rate limiter and integrate with poller clustering. Add llm_calls table to DB and tests. Commit to feature/llm-client.
+```
+
+**Acceptance criteria:**
+
+* `pytest backend/tests/test_llm_client.py` passes.
+* Poller stores LLM summaries for groups crossing thresholds.
+* When `LLM_MODE=heuristic`, no external calls made and impact_points persisted.
+Great — here are the **next 5 prompts (6–10)**, each fully actionable and unambiguous so you can paste them into Antigravity or hand them to a developer. They continue where the first five left off and complete the full build plan: **orderbook + blending, API + WebSocket + frontend, CI & deployment, anti-manipulation & audit, and final demo + docs**.
+
+---
+
+# Prompt 6 — Orderbook Engine + Final Price Blending (exact, runnable)
+
+**Title:** `feature/orderbook-and-blend`
+
+**Objective:** Implement a rigorous limit orderbook (price-time priority, partial fills), the order REST API, and the final price blending logic that merges MarketPrice and RealityScore into FinalPrice.
+
+**Branch:** `feature/orderbook` (from `dev`)
+
+---
+
+## Files to create / modify (exact paths & required functions)
+
+1. `backend/app/matching/orderbook.py` — core orderbook engine
+
+   * Class `OrderBook(stock_id: str)` with in-memory structures:
+
+     * `bids` (max-heap or sorted dict keyed by price descending -> queue of orders)
+     * `asks` (min-heap keyed by price ascending -> queue of orders)
+     * `orders` dict mapping `order_id` -> order object (for cancelation)
+     * `last_trade` object `{price, qty, timestamp}`
+   * Order object schema:
+
+     ```py
+     {
+       "order_id": str,
+       "user_id": str,
+       "stock_id": str,
+       "side": "buy"|"sell",
+       "type": "limit"|"market",
+       "price": float,  # price per share for limits; for market may be None
+       "qty": float,
+       "filled": float,  # initially 0
+       "timestamp": datetime
+     }
+     ```
+   * Methods (exact signatures):
+
+     * `place_order(order: dict) -> dict`
+
+     * `scores[stock_id]`, `market[stock_id]`, `final[stock_id]`, `events` list.
+   * Display:
+
+     * Top header showing selected stock final price + small badges for reality & market components.
+     * Chart for final price (append final values into data series).
+     * Orderbook component showing top bids/asks (Orderbook.jsx).
+     * EventsList showing recent `event_summary` with links to `sources`.
+   * Add a control: `Simulate News` button that `POST /api/v1/simulate` (create a small endpoint in backend for dev only) to create a synthetic event for demo.
+
+3. `frontend/src/components/Chart.jsx` — Chart.js integration to plot `final` over time.
+
+4. `frontend/src/components/Orderbook.jsx` — display top N levels.
+
+---
+
+## Unit / Integration tests
+
+* `frontend` minimal test: ensure `connectWS` returns a ws object (mocked).
+* `backend/tests/test_ws_broadcast.py`:
+
+  * Start server test client, open WebSocket, inject a reality_update via calling `apply_event`, assert client receives the message.
+
+---
+
+## Run & verify locally
+
+1. Start backend:
+
+   ```bash
+   cd backend
+   uvicorn app.main:app --reload --port 8000
+   ```
+
+2. Start frontend:
+
+   ```bash
+   cd frontend
+   npm run dev
+   ```
+
+3. Open `http://localhost:5173` (default Vite port). Dashboard should connect; console shows WS open.
+
+4. Trigger simulation:
+
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/v1/simulate -H "Content-Type: application/json" -d '{"stock_id":"elon","impact_points":10,"summary":"Simulated positive event"}'
+   ```
+
+   * Expect UI to update: reality increases, final updates, chart appended, event list shows new event.
+
+---
+
+## LLM agent instruction (Antigravity-ready)
+
+```
+Implement WebSocket manager and routes for broadcasting real-time messages. Implement React dashboard with WS connection, Chart.js chart, Orderbook view and Events list. Add a dev-only /api/v1/simulate endpoint to push synthetic events. Commit to feature/frontend-api.
+```
+
+---
+
+## Acceptance criteria
+
+* WebSocket clients receive `reality_update`, `market_update`, `final_update`, and `event_summary`.
+* UI shows live updates when simulation triggered.
+* Order placement via UI calls `/api/v1/orders` and updates orderbook in real time.
+
+---
+
+# Prompt 8 — CI, GitHub Actions & Railway Deployment (exact, safe)
+
+**Title:** `chore/ci-deploy`
+
+**Objective:** Add CI to run tests on PRs and wire the repository for deployment to Railway (safe instructions). Provide a non-destructive GitHub Actions `deploy.yml` that runs tests and notifies about deployment; instruct manual Railway connect for production deployment.
+
+**Branch:** `chore/ci-deploy` (from `dev`)
+
+---
+
+## CI (already partially added) — refine
+
+1. `.github/workflows/ci.yml` — ensure it:
+
+   * Runs on `pull_request` and `push` to `dev`.
+   * Sets up Postgres service for tests.
+   * Installs backend deps and runs `pytest -q`.
+
+2. Add `python -m compileall .` to ensure no syntax errors.
+
+---
+
+## Deploy workflow (safe approach)
+
+Because Railway auto-deploy works via linking repo in Railway UI, the recommended safe flow is:
+
+* Add `.github/workflows/deploy.yml` that runs on `push` to `main` and does:
+
+  1. Run tests.
+  2. Build Docker image.
+  3. Optionally push image to GitHub Container Registry (GHCR) if you want a built artifact.
+  4. Post a GitHub status comment advising the developer to trigger Railway deployment (or if Railway is connected, Railway will auto-deploy on push).
+
+**Exact `deploy.yml` content (non-destructive):**
+
+```yaml
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.11
+      - name: Install and test
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pytest -q
+      - name: Build Docker image (optional)
+        run: |
+          docker build -t em-backend:latest backend
+      - name: Create GH comment (notify)
+        uses: peter-evans/create-or-update-comment@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: 1
+          body: "CI passed on main. If you have Railway linked, it should auto-deploy. Otherwise run 'railway up' locally or deploy via Railway dashboard."
+```
+
+> **Railway setup (manual instructions to include in docs/README):**
+>
+> 1. Go to Railway.app and create a new project.
+> 2. Select "Deploy from GitHub", connect your GitHub account, and pick `everything-market`.
+> 3. Add a Postgres plugin (Railway will provide `DATABASE_URL`).
+> 4. Create two services: `api` (command: default Docker run using `backend/Dockerfile`) and `scraper-worker` (command: `python -m app.scraper.poller`).
+> 5. In Railway’s env settings set `POLL_INTERVAL=300`, `LLM_MODE=heuristic`, `LLM_CALLS_PER_HOUR=10`.
+> 6. Click "Deploy" and monitor logs.
+
+---
+
+## LLM agent instruction (Antigravity-ready)
+
+```
+Add CI workflow that runs pytest on PRs and a deploy workflow on push to main that builds the backend Docker image and posts a notification. Do not attempt to deploy automatically—include instructions for Railway manual linking in README. Commit to branch chore/ci-deploy.
+```
+
+---
+
+## Acceptance criteria
+
+* PR triggers CI and runs tests.
+* Merge to `main` triggers `deploy` workflow and creates a GitHub comment.
+* README contains step-by-step Railway link instructions.
+
+---
+
+# Prompt 9 — Anti-Manipulation Rules, Audit Logging & Admin Interface
+
+**Title:** `feature/antimanipulation-audit`
+
+**Objective:** Implement the anti-manipulation safeguards from our plan, create an audit log for LLM summaries and major score changes, and provide a simple admin endpoint to review & approve pending high-impact changes.
+
+**Branch:** `feature/antimanipulation` (from `dev`)
+
+---
+
+## Files & functionality
+
+1. `backend/app/security/antimanip.py`
+
+   * Implement rules (functions):
+
+     * `requires_multi_source(event_group) -> bool` returns True if `len(independent_sources) >= MIN_INDEP_SOURCES` (MIN_INDEP_SOURCES default 2).
+     * `cap_single_source_influence(stock_id, source_id, points) -> float` computes allowed capped points for this source in a rolling 24h window (e.g., max 20% of daily allowed range). For MVP implement simple cap: `max_single = 20`; return `min(points, max_single)`.
+     * `is_suspicious(event_group) -> bool` flags extreme spikes (z-score > 5) using last 24h score variance (store small in-memory sliding history).
+2. `backend/app/models.py` (DB)
+
+   * Add table `llm_audit` with columns: `(event_id, stock_id, summary, impact, sources jsonb, created_at, approved boolean, approved_by, approved_at)`.
+   * Add table `score_changes` with `(stock_id, old_score, new_score, delta, event_id, timestamp)`.
+3. Modify `reality_engine.apply_event`:
+
+   * If `abs(delta) > SUSPICIOUS_DELTA` (configurable, e.g., 15 points) then:
+
+     * Insert `llm_audit` row with `approved=false`.
+     * Set UI-facing `score_state` to `pending_review` (do not publish final reality_update until approved).
+     * Notify admin via the WebSocket `event_summary` with `pending_review:true`.
+   * Otherwise persist as normal and broadcast.
+4. Add admin endpoints:
+
+   * `GET /api/v1/admin/pending` — returns list of pending audit events (requires a simple API key in header `X-ADMIN-KEY` for MVP).
+   * `POST /api/v1/admin/approve` — body `{event_id, approve: true/false, admin_id}` — if approve true, apply the pending score change and broadcast; if false, dismiss and log.
+
+---
+
+## Unit tests
+
+* `backend/tests/test_antimanip.py`:
+
+  * Test that an event causing >SUSPICIOUS_DELTA creates a pending `llm_audit` row and does not update `scores` until approved.
+  * Test cap_single_source_influence behavior.
+
+---
+
+## Env vars & config
+
+* `MIN_INDEP_SOURCES=2`
+* `SUSPICIOUS_DELTA=15`
+* `ADMIN_API_KEY` (set in Railway for admin endpoints)
+
+---
+
+## Run & verify
+
+1. Start backend.
+2. POST a simulated event with `impact_points = 20` (over SUSPICIOUS_DELTA):
+
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/v1/simulate -H "Content-Type: application/json" -d '{"stock_id":"elon","impact_points":20,"summary":"big event"}'
+   ```
+3. Check `/api/v1/admin/pending` with header `X-ADMIN-KEY: <ADMIN_API_KEY>` — you should see the pending audit.
+4. Approve via `/api/v1/admin/approve` — final score should apply and broadcast.
+
+---
+
+## LLM agent instruction
+
+```
+Implement anti-manipulation protection: multi-source requirement, single-source cap, suspicious spike detection. Add audit DB tables and admin endpoints to review/approve pending high-impact events. Protect admin endpoints with API key set in ADMIN_API_KEY env. Commit to feature/antimanipulation.
+```
+
+---
+
+## Acceptance criteria
+
+* Pending high-impact events require admin approval before final score change.
+* Admin endpoints require `X-ADMIN-KEY`.
+* Audit table contains LLM summary and sources for every pending event.
+
+---
+
+# Prompt 10 — Demo Script, Documentation & Handoff (exact, investor-ready)
+
+**Title:** `release/demo-and-docs`
+
+**Objective:** Produce the investor demo script, README / docs for onboarding a developer, runbook for Railway, and final checklist. Also add an export script to snapshot the current state for demos (CSV of scores + last events).
+
+**Branch:** `release/demo-docs` (from `dev`)
+
+---
+
+## Files to create / update
+
+1. `docs/demo_script.md` — step-by-step investor demo script (see below for exact content).
+2. `README.md` — top-level quickstart with exact commands to run locally, env var list, and Railway setup summary.
+3. `scripts/export_snapshot.py` — script to dump current `scores` + recent `events` to `./snapshots/snapshot-<timestamp>.csv`.
+4. `docs/handoff.md` — developer handoff with explanation of branches, where to look for core code, common troubleshooting steps, and how to change `sources.yaml`.
+
+---
+
+## Exact investor demo script (copy/paste into `docs/demo_script.md`)
+
+**Preparation (local)**
+
+1. `git clone git@github.com:<YOU>/everything-market.git`
+2. `git checkout dev`
+3. Create venv and install:
+
+   ```bash
+   cd everything-market/backend
+   python -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
+   python -m spacy download en_core_web_sm
+   ```
+4. Start backend:
+
+   ```bash
+   uvicorn app.main:app --reload --port 8000
+   ```
+5. Start frontend:
+
+   ```bash
+   cd ../frontend
+   npm install
+   npm run dev
+   ```
+
+**Demo flow (what to show)**
+
+1. Show UI main page: highlight final price, reality score, market price widgets and the events list.
+2. Trigger a simulated good event:
+
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/v1/simulate -H "Content-Type: application/json" -d '{"stock_id":"elon","impact_points":8,"summary":"Simulated positive announcement"}'
+   ```
+
+   * Expected: UI shows event in EventsList, RealityScore increases gradually, FinalPrice moves.
+3. Place a buy order from another terminal (simulate a user):
+
+   ```bash
+   curl -X POST http://127.0.0.1:8000/api/v1/orders -H "Content-Type: application/json" -d '{"user_id":"investor1","stock_id":"elon","side":"buy","type":"limit","price":66,"qty":5}'
+   ```
+
+   * Expected: Orderbook shows new bid, market_update broadcasted.
+4. Simulate multiple sources negative event to demonstrate anti-manipulation:
+
+   * POST two or more simulated events with negative impacts totalling >15 to create a pending audit.
+   * Show `/api/v1/admin/pending` — demonstrate admin approval and final propagation.
+5. Export snapshot:
+
+   ```bash
+   python scripts/export_snapshot.py
+   ls snapshots/
+   ```
+
+   * Show the CSV containing current scores and last events.
+
+**Talking points for investors**
+
+* Explain RealityEngine vs MarketPrice vs FinalPrice and why blending reduces noise.
+* Explain anti-manipulation safeguards and the audit trail (LLM summaries & source links).
+* Show cost model for MVP: Railway free tier + local LLM heuristic.
+* Roadmap: scale embeddings to vector DB, move LLM to Gemini/OpenAI for quality, add KYC and payment rails when ready.
+
+---
+
+## scripts/export_snapshot.py (exact)
+
+```python
+# scripts/export_snapshot.py
+import csv, os
+from datetime import datetime
+import sqlalchemy as sa
+from sqlalchemy.orm import sessionmaker
+
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./data.db')
+engine = sa.create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if DATABASE_URL.startswith('sqlite') else {})
+Session = sessionmaker(bind=engine)
+
+def export():
+    meta = sa.MetaData()
+    scores = sa.Table('scores', meta, autoload_with=engine)
+    events = sa.Table('events', meta, autoload_with=engine)
+    s = Session()
+    outdir = './snapshots'
+    os.makedirs(outdir, exist_ok=True)
+    fname = os.path.join(outdir, f'snapshot-{datetime.utcnow().isoformat()}.csv')
+    with open(fname,'w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(['stock_id','score','confidence','last_updated','last_event_id','last_event_summary','last_event_impact'])
+        for row in s.execute(sa.select(scores)).fetchall():
+            # find last event for this stock
+            ev = s.execute(sa.select(events).where(events.c.id==row.stock_id).order_by(events.c.created_at.desc()).limit(1)).fetchone()
+            w.writerow([row.stock_id, row.score, row.confidence, row.last_updated, ev.id if ev else '', ev.summary if ev else '', ev.impact if ev else ''])
+    print('snapshot written to', fname)
+
+if __name__ == '__main__':
+    export()
+```
+
+---
+
+## Tests & checklist
+
+* Ensure `scripts/export_snapshot.py` produces a CSV file with rows for existing scores.
+* Ensure `docs/demo_script.md` steps run on a clean dev machine (document any missing dependencies).
+
+---
+
+## LLM agent instruction (Antigravity-ready)
+
+```
+Create the demo script file docs/demo_script.md, export_snapshot.py, README updates with quickstart, and docs/handoff.md that explains branches, where to find code, and how to change sources.yaml. Commit to branch release/demo-docs.
+```
+
+---
+
+## Acceptance criteria
+
+* Demo script runs end-to-end locally for a fresh developer following the steps.
+* Snapshot script writes CSV into `./snapshots`.
+* README contains exact commands and Railway link instructions.
