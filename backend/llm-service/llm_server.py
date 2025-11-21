@@ -82,8 +82,9 @@ async def load_model():
                     low_cpu_mem_usage=True
                 )
                 logger.info("Model loaded with 4-bit quantization")
-            except Exception as e:
-                logger.warning(f"4-bit quantization failed: {e}, loading without quantization")
+            except (ImportError, Exception) as e:
+                logger.warning(f"4-bit quantization not available (Windows or missing bitsandbytes): {e}")
+                logger.info("Loading with float16 instead...")
                 model = AutoModelForCausalLM.from_pretrained(
                     MODEL_NAME,
                     torch_dtype=torch.float16,
@@ -91,6 +92,7 @@ async def load_model():
                     cache_dir=CACHE_DIR,
                     low_cpu_mem_usage=True
                 )
+                logger.info("Model loaded with float16")
         else:
             model = AutoModelForCausalLM.from_pretrained(
                 MODEL_NAME,
@@ -99,6 +101,7 @@ async def load_model():
                 cache_dir=CACHE_DIR,
                 low_cpu_mem_usage=True
             )
+            logger.info("Model loaded with float16")
         
         model_loaded = True
         logger.info("Model loaded successfully!")
