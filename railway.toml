@@ -1,0 +1,39 @@
+# Railway Monorepo Configuration
+# This tells Railway to deploy 3 separate services from one repo
+
+[[services]]
+name = "backend"
+source = "backend"
+
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[services.deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/"
+healthcheckTimeout = 30
+
+[[services]]
+name = "llm-service"
+source = "llm-service"
+
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[services.deploy]
+startCommand = "python llm_server.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+healthcheckStartPeriod = 180
+
+[[services]]
+name = "frontend"
+source = "frontend"
+
+[services.build]
+builder = "NIXPACKS"
+
+[services.deploy]
+startCommand = "npm start"
