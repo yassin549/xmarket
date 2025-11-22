@@ -1,6 +1,8 @@
 import sqlalchemy as sa
 from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
+import os
 
 Base = declarative_base()
 
@@ -35,3 +37,28 @@ class LLMCall(Base):
     model_name = sa.Column(sa.String(100))
     tokens_used = sa.Column(sa.Integer)
     cost_usd = sa.Column(sa.Float)
+
+# Database setup
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./data.db')
+
+# Handle Railway PostgreSQL URL format (postgres:// -> postgresql://)
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+
+engine = sa.create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith('sqlite') else {}
+)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create tables
+Base.metadata.create_all(engine)
+
+def get_db():
+    """Dependency for FastAPI endpoints to get database session"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

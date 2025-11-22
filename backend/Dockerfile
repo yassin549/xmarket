@@ -4,6 +4,7 @@ COPY requirements.txt .
 RUN apt-get update && apt-get install -y build-essential libxml2-dev libxslt-dev libjpeg-dev zlib1g-dev git ffmpeg curl \
     && pip install --upgrade pip \
     && pip install -r requirements.txt \
+    && python -m spacy download en_core_web_sm \
     && playwright install --with-deps chromium
 COPY . .
 ENV PYTHONDONTWRITEBYTECODE=1

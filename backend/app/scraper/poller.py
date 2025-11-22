@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 
 # Optional imports
 try:
-    from ..nlp.embed import get_embedder
+    from ..nlp.embed import get_embedding_service
     from ..index.vector_index import get_vector_index
-    from ..nlp.quick_scorer import quick_score
+    from ..scoring.quick_scorer import quick_score
     from ..nlp.llm_client import get_llm_client
-    from ..scoring.reality_engine import get_reality_engine
+    # from ..scoring.reality_engine import get_reality_engine  # TODO: implement
     FULL_PIPELINE_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Full pipeline not available: {e}")
@@ -101,29 +101,25 @@ def process_articles_batch(articles):
     logger.info(f"Processing {len(articles)} articles through full pipeline")
     
     # Step 1: Generate embeddings
-    embedder = get_embedder()
+    embedding_service = get_embedding_service()
     vector_index = get_vector_index()
     
     for art in articles:
         # Generate embedding
-        embedding = embedder.embed(art['text'])
+        embedding = embedding_service.embed_text(art['text'])
         
         # Calculate quick score
-        art['quick_score'] = quick_score(art['text'], art['title'])
+        art['quick_score'] = quick_score(art['text'], source_trust=art['trust'])
         
         # Check for duplicates in vector index
-        similar = vector_index.search(embedding, k=5, threshold=0.88)
-        if similar:
-            logger.info(f"Skipping duplicate article: {art['title']}")
+        similar = vector_index.query_vector(embedding, k=5)
+        # Check if any similar article is above duplicate threshold (0.88)
+        if similar and similar[0][1] > 0.88:
+            logger.info(f"Skipping duplicate article: {art['title']} (similar to {similar[0][0]})")
             continue
         
         # Add to vector index
-        vector_index.add(art['id'], embedding, {
-            'title': art['title'],
-            'source_id': art['source_id'],
-            'quick_score': art['quick_score'],
-            'trust': art['trust']
-        })
+        vector_index.add_vector(art['id'], embedding)
     
     # Step 2: Cluster similar articles
     clusters = cluster_articles(articles)
@@ -185,18 +181,20 @@ def cluster_articles(articles):
             continue
         
         # Find similar articles
-        embedding = get_embedder().embed(art['text'])
-        similar = vector_index.search(embedding, k=10, threshold=CLUSTER_SIMILARITY_THRESHOLD)
+        embedding = get_embedding_service().embed_text(art['text'])
+        similar = vector_index.query_vector(embedding, k=10)
         
         # Build cluster
         cluster = [art]
         processed.add(art['id'])
         
         for sim_id, score in similar:
-            sim_art = next((a for a in articles if a['id'] == sim_id), None)
-            if sim_art and sim_art['id'] not in processed:
-                cluster.append(sim_art)
-                processed.add(sim_art['id'])
+            # Only cluster if similarity > threshold
+            if score >= CLUSTER_SIMILARITY_THRESHOLD:
+                sim_art = next((a for a in articles if a['id'] == sim_id), None)
+                if sim_art and sim_art['id'] not in processed:
+                    cluster.append(sim_art)
+                    processed.add(sim_art['id'])
         
         clusters.append(cluster)
     
