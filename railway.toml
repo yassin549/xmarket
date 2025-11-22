@@ -1,22 +1,72 @@
-[build]
-builder = "DOCKERFILE"
+# Railway.toml - Auto-detect all services
 
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "echo 'Use service-specific start commands'"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Backend Service
 [[services]]
 name = "backend"
-dockerfile = "backend/Dockerfile"
-root = "backend"
+source = "backend"
 
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[services.deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+
+[[services.domains]]
+# Railway will auto-generate domain
+
+# Orderbook Service
 [[services]]
 name = "orderbook"
-dockerfile = "orderbook/Dockerfile"
-root = "orderbook"
+source = "orderbook"
 
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "orderbook/Dockerfile"
+
+[services.deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+
+[[services.domains]]
+# Railway will auto-generate domain
+
+# Reality Engine Service
 [[services]]
 name = "reality-engine"
-dockerfile = "reality-engine/Dockerfile"
-root = "reality-engine"
+source = "reality-engine"
 
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "reality-engine/Dockerfile"
+
+[services.deploy]
+startCommand = "python -m app.main"
+
+# Frontend Service
 [[services]]
 name = "frontend"
-dockerfile = "frontend/Dockerfile"
-root = "frontend"
+source = "frontend"
+
+[services.build]
+builder = "DOCKERFILE"
+dockerfilePath = "frontend/Dockerfile"
+
+[services.deploy]
+startCommand = "nginx -g 'daemon off;'"
+healthcheckPath = "/"
+healthcheckTimeout = 100
+
+[[services.domains]]
+# Railway will auto-generate domain
