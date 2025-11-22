@@ -1,219 +1,299 @@
-# Railway One-Click Deployment Guide
+# Railway Deployment - Manual Service Setup
 
-## Automatic Service Detection
+Since Railway's auto-detection may not work perfectly for monorepos, here's the manual setup process:
 
-Railway will now automatically detect all 4 services when you deploy from GitHub!
+## Step 1: Push to GitHub
 
-### How It Works
+```bash
+# If you haven't already
+git remote add origin https://github.com/YOUR_USERNAME/xmarket.git
+git push -u origin main
+```
 
-The project is configured with:
-- **Root `railway.toml`** - Defines all 4 services
-- **Service-specific `railway.json`** files - Configure each service individually
+## Step 2: Create Railway Project
 
-### Deployment Steps
+1. Go to https://railway.app/new
+2. Click **"Empty Project"**
+3. Name it `xmarket`
 
-1. **Push to GitHub**:
-   ```bash
-   git add .
-   git commit -m "Add Railway auto-detection config"
-   git push origin main
+## Step 3: Add PostgreSQL Database
+
+1. Click **"+ New"**
+2. Select **"Database"** → **"PostgreSQL"**
+3. Railway creates the database with auto-generated `DATABASE_URL`
+
+## Step 4: Add Backend Service
+
+1. Click **"+ New"** → **"GitHub Repo"**
+2. Select your `xmarket` repository
+3. Railway will ask for **Root Directory** → Enter: `backend`
+4. **Service Settings**:
+   - Name: `backend`
+   - Build: Dockerfile (auto-detected from `backend/Dockerfile`)
+   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+5. **Environment Variables** (click "Variables"):
    ```
-
-2. **Deploy on Railway**:
-   - Go to https://railway.app/new
-   - Click **"Deploy from GitHub repo"**
-   - Select `everything-market` repository
-   - Railway will automatically detect all 4 services!
-
-3. **Add PostgreSQL**:
-   - Click **"+ New"** → **"Database"** → **"PostgreSQL"**
-   - Railway will automatically add `DATABASE_URL` to all services
-
-4. **Set Environment Variables**:
-   
-   Generate secrets first:
-   ```bash
-   python scripts/generate_secrets.py
-   ```
-   
-   Then add to **Shared Variables** (applies to all services):
-   - `REALITY_API_SECRET` = (from generate_secrets.py)
-   - `ADMIN_API_KEY` = (from generate_secrets.py)
-   - `JWT_SECRET` = (from generate_secrets.py)
-   
-   **Backend-specific**:
-   - `ORDERBOOK_URL` = `${{orderbook.RAILWAY_PUBLIC_DOMAIN}}`
-   
-   **Reality Engine-specific**:
-   - `BACKEND_URL` = `${{backend.RAILWAY_PUBLIC_DOMAIN}}`
-   - `POLL_INTERVAL` = `300`
-   - `LLM_MODE` = `heuristic`
-   
-   **Frontend-specific**:
-   - `VITE_BACKEND_URL` = `https://${{backend.RAILWAY_PUBLIC_DOMAIN}}`
-   - `VITE_WS_URL` = `wss://${{backend.RAILWAY_PUBLIC_DOMAIN}}/ws/updates`
-
-5. **Initialize Database**:
-   
-   **Option A: Railway CLI** (recommended):
-   ```bash
-   npm install -g @railway/cli
-   railway login
-   railway link
-   railway run python scripts/init_db.py
+   REALITY_API_SECRET=<run: python scripts/generate_secrets.py>
+   ADMIN_API_KEY=<from generate_secrets.py>
+   JWT_SECRET=<from generate_secrets.py>
+   PORT=8000
    ```
    
-   **Option B: SQL Query** (in Railway dashboard):
-   - Go to PostgreSQL → Data → Query
-   - Copy/paste contents of `scripts/init_database.sql`
-   - Click "Run"
+   Note: `DATABASE_URL` is automatically added by Railway
 
-6. **Deploy**:
-   - All services will deploy automatically
-   - Railway will assign URLs to each service
+6. Click **"Deploy"**
 
-7. **Verify**:
-   - Backend: `https://backend-production-XXXX.up.railway.app/health`
-   - Orderbook: `https://orderbook-production-XXXX.up.railway.app/`
-   - Frontend: `https://frontend-production-XXXX.up.railway.app/`
+## Step 5: Add Orderbook Service
 
----
+1. Click **"+ New"** → **"GitHub Repo"**
+2. Select `xmarket` repository
+3. **Root Directory**: `orderbook`
+4. **Service Settings**:
+   - Name: `orderbook`
+   - Build: Dockerfile
+   - Start Command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 
-## Service Configuration
+5. **Environment Variables**:
+   ```
+   PORT=8001
+   ```
 
-### Detected Services
+6. Click **"Deploy"**
 
-Railway will create these services automatically:
+## Step 6: Add Reality Engine Service
 
-1. **backend**
-   - Root directory: `backend/`
-   - Dockerfile: `backend/Dockerfile`
-   - Health check: `/health`
-   - Port: Auto-assigned
+1. Click **"+ New"** → **"GitHub Repo"**
+2. Select `xmarket` repository
+3. **Root Directory**: `reality-engine`
+4. **Service Settings**:
+   - Name: `reality-engine`
+   - Build: Dockerfile
+   - Start Command: `python -m app.main`
 
-2. **orderbook**
-   - Root directory: `orderbook/`
-   - Dockerfile: `orderbook/Dockerfile`
-   - Health check: `/`
-   - Port: Auto-assigned
+5. **Environment Variables**:
+   ```
+   REALITY_API_SECRET=<same as backend>
+   POLL_INTERVAL=300
+   LLM_MODE=heuristic
+   ```
 
-3. **reality-engine**
-   - Root directory: `reality-engine/`
-   - Dockerfile: `reality-engine/Dockerfile`
-   - No health check (background service)
+6. Click **"Deploy"**
 
-4. **frontend**
-   - Root directory: `frontend/`
-   - Dockerfile: `frontend/Dockerfile`
-   - Health check: `/`
-   - Port: 80 (Nginx)
+## Step 7: Add Frontend Service
 
----
+1. Click **"+ New"** → **"GitHub Repo"**
+2. Select `xmarket` repository
+3. **Root Directory**: `frontend`
+4. **Service Settings**:
+   - Name: `frontend`
+   - Build: Dockerfile
+   - Start Command: `nginx -g 'daemon off;'`
 
-## Environment Variable Reference
+5. **Environment Variables**:
+   ```
+   (Set after getting backend URL)
+   ```
 
-### Shared Variables (All Services)
+6. Click **"Deploy"**
+
+## Step 8: Configure Service URLs
+
+After all services deploy, Railway assigns public URLs. Now update cross-service references:
+
+### Get Service URLs
+
+Go to each service → Settings → Networking → Copy the public URL:
+- Backend: `backend-production-XXXX.up.railway.app`
+- Orderbook: `orderbook-production-XXXX.up.railway.app`
+
+### Update Environment Variables
+
+**Backend Service** → Variables → Add:
 ```
-DATABASE_URL          - Auto-provided by Railway PostgreSQL
-REALITY_API_SECRET    - Generate with scripts/generate_secrets.py
-ADMIN_API_KEY         - Generate with scripts/generate_secrets.py
-JWT_SECRET            - Generate with scripts/generate_secrets.py
-```
-
-### Backend
-```
-ORDERBOOK_URL         - ${{orderbook.RAILWAY_PUBLIC_DOMAIN}}
-PORT                  - Auto-assigned by Railway
-```
-
-### Orderbook
-```
-PORT                  - Auto-assigned by Railway
-```
-
-### Reality Engine
-```
-BACKEND_URL           - ${{backend.RAILWAY_PUBLIC_DOMAIN}}
-POLL_INTERVAL         - 300
-LLM_MODE              - heuristic
-```
-
-### Frontend
-```
-VITE_BACKEND_URL      - https://${{backend.RAILWAY_PUBLIC_DOMAIN}}
-VITE_WS_URL           - wss://${{backend.RAILWAY_PUBLIC_DOMAIN}}/ws/updates
+ORDERBOOK_URL=https://orderbook-production-XXXX.up.railway.app
 ```
 
----
+**Reality Engine Service** → Variables → Add:
+```
+BACKEND_URL=https://backend-production-XXXX.up.railway.app
+```
 
-## Railway Service References
+**Frontend Service** → Variables → Add:
+```
+VITE_BACKEND_URL=https://backend-production-XXXX.up.railway.app
+VITE_WS_URL=wss://backend-production-XXXX.up.railway.app/ws/updates
+```
 
-Railway allows you to reference other services using `${{service-name.VARIABLE}}`:
+### Redeploy Services
 
-- `${{backend.RAILWAY_PUBLIC_DOMAIN}}` - Backend's public URL
-- `${{orderbook.RAILWAY_PUBLIC_DOMAIN}}` - Orderbook's public URL
-- `${{postgres.DATABASE_URL}}` - PostgreSQL connection string
+After updating URLs:
+1. Go to each service
+2. Click **"Deployments"** tab
+3. Click **"Redeploy"** on the latest deployment
 
-This automatically updates when services are deployed!
+## Step 9: Initialize Database
 
----
+### Option A: Railway CLI (Recommended)
+
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Login
+railway login
+
+# Link to your project
+railway link
+
+# Run initialization
+railway run python scripts/init_db.py
+```
+
+### Option B: SQL Query (Browser)
+
+1. Go to **PostgreSQL service** → **Data** tab → **Query**
+2. Copy the entire contents of `scripts/init_database.sql`
+3. Paste into the query editor
+4. Click **"Run"**
+5. Verify output shows stocks created
+
+## Step 10: Verify Deployment
+
+### Check Health Endpoints
+
+**Backend**:
+```
+https://backend-production-XXXX.up.railway.app/health
+```
+Expected: `{"status":"healthy","database":"connected"}`
+
+**Orderbook**:
+```
+https://orderbook-production-XXXX.up.railway.app/
+```
+Expected: `{"service":"everything-market-orderbook","status":"healthy"}`
+
+**Frontend**:
+```
+https://frontend-production-XXXX.up.railway.app/
+```
+Expected: Dashboard loads with stock selector
+
+### Test API
+
+**List Stocks**:
+```
+https://backend-production-XXXX.up.railway.app/api/v1/stocks
+```
+Should return: `[{"symbol":"ELON",...}, {"symbol":"AI_INDEX",...}, ...]`
+
+## Step 11: Generate Secrets
+
+Run locally before deployment:
+
+```bash
+python scripts/generate_secrets.py
+```
+
+Copy the output and use for environment variables in Step 4-7.
 
 ## Troubleshooting
 
-### Services Not Detected
-- Verify `railway.toml` is in root directory
-- Verify each service has `railway.json` in its directory
-- Check Dockerfile paths are correct
+### Service Won't Build
 
-### Build Failures
-- Check logs in Railway dashboard
-- Verify Dockerfiles are valid
-- Ensure all dependencies are in requirements.txt
+**Check**:
+1. Logs tab for build errors
+2. Dockerfile path is correct
+3. Root directory is set correctly
 
-### Environment Variables Not Set
-- Use Railway's "Shared Variables" for common vars
-- Use service-specific variables for unique configs
-- Verify variable names match exactly
+**Common Issues**:
+- Missing `config/` directory → Copy from root to each service
+- Import errors → Check Python path in Dockerfile
 
----
+### Database Connection Failed
 
-## Cost Optimization
+**Check**:
+1. PostgreSQL service is running
+2. `DATABASE_URL` variable exists (auto-added by Railway)
+3. Services are in same project
 
-**Free Tier**:
-- $5 credit/month
-- Services sleep after 30min inactivity
-- Good for development
+**Fix**: Railway auto-adds `DATABASE_URL` to all services in the same project
 
-**Hobby Plan** ($5/month):
-- $5 credit included
-- No sleeping
-- Better for staging
+### Frontend Shows "Loading..."
 
-**Pro Plan** ($20/month):
-- $20 credit included
-- Priority support
-- Production-ready
+**Check**:
+1. Browser console for errors
+2. `VITE_BACKEND_URL` is correct
+3. Backend is running
 
-**Estimated Monthly Cost**:
-- 4 services × $5 = $20
-- PostgreSQL: $5
-- **Total**: ~$25/month (Pro plan recommended)
+**Fix**: 
+- Verify backend URL has `https://` prefix
+- Verify WebSocket URL has `wss://` prefix
 
----
+### Reality Engine Not Publishing Events
+
+**Check**:
+1. Logs for scraping activity
+2. `BACKEND_URL` is correct
+3. `REALITY_API_SECRET` matches backend
+
+**Fix**: Ensure secrets match exactly between services
+
+## Railway Service Configuration Summary
+
+| Service | Root Dir | Dockerfile | Port | Health Check |
+|---------|----------|------------|------|--------------|
+| backend | `backend` | `backend/Dockerfile` | 8000 | `/health` |
+| orderbook | `orderbook` | `orderbook/Dockerfile` | 8001 | `/` |
+| reality-engine | `reality-engine` | `reality-engine/Dockerfile` | N/A | None |
+| frontend | `frontend` | `frontend/Dockerfile` | 80 | `/` |
+
+## Environment Variables Quick Reference
+
+### Shared (All Services)
+- `DATABASE_URL` - Auto-provided by Railway
+
+### Backend
+- `REALITY_API_SECRET` - Generate with scripts/generate_secrets.py
+- `ADMIN_API_KEY` - Generate with scripts/generate_secrets.py
+- `JWT_SECRET` - Generate with scripts/generate_secrets.py
+- `ORDERBOOK_URL` - https://orderbook-production-XXXX.up.railway.app
+- `PORT` - 8000
+
+### Orderbook
+- `PORT` - 8001
+
+### Reality Engine
+- `REALITY_API_SECRET` - Same as backend
+- `BACKEND_URL` - https://backend-production-XXXX.up.railway.app
+- `POLL_INTERVAL` - 300
+- `LLM_MODE` - heuristic
+
+### Frontend
+- `VITE_BACKEND_URL` - https://backend-production-XXXX.up.railway.app
+- `VITE_WS_URL` - wss://backend-production-XXXX.up.railway.app/ws/updates
+
+## Cost Estimate
+
+**Monthly Cost** (Railway Pro Plan recommended):
+- 4 services × $5/month = $20
+- PostgreSQL: $5/month
+- **Total**: ~$25/month
+
+**Free Tier**: $5 credit/month (services sleep after inactivity)
 
 ## Next Steps After Deployment
 
-1. ✅ Verify all services are running
-2. ✅ Check health endpoints
-3. ✅ Initialize database
-4. ✅ Test API endpoints
-5. ✅ Create test stock
-6. ✅ Simulate reality event
-7. ✅ Place test orders
-8. ✅ Monitor logs
+1. ✅ Test all health endpoints
+2. ✅ Create test stock via admin API
+3. ✅ Run `python scripts/demo_event.py` locally
+4. ✅ Watch dashboard update in real-time
+5. ✅ Place test orders
+6. ✅ Monitor logs for errors
 
 ---
 
-**Deployment Time**: ~10 minutes (fully automated!)
-**Difficulty**: Easy (one-click deployment)
-**Support**: Railway Discord, docs.railway.app
+**Deployment Time**: ~20-30 minutes
+**Difficulty**: Medium (manual service setup)
+**Support**: Railway Discord at discord.gg/railway
