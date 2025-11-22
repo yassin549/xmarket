@@ -1,0 +1,22 @@
+[build]
+builder = "DOCKERFILE"
+
+[[services]]
+name = "backend"
+dockerfile = "backend/Dockerfile"
+root = "backend"
+
+[[services]]
+name = "orderbook"
+dockerfile = "orderbook/Dockerfile"
+root = "orderbook"
+
+[[services]]
+name = "reality-engine"
+dockerfile = "reality-engine/Dockerfile"
+root = "reality-engine"
+
+[[services]]
+name = "frontend"
+dockerfile = "frontend/Dockerfile"
+root = "frontend"

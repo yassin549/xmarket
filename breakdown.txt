@@ -1,295 +1,484 @@
-# 1. High‑level concept
+Short summary: you’ll run 4 Railway services — reality-engine, orderbook, backend, and frontend.
+The Reality Engine scrapes top-3 news sites, runs the tinyLLama LLM + quick-scorer pipeline and emits per-stock impacts. The Backend receives these impacts, requests the Orderbook for current market pressure (buys vs sells), blends Reality + Market into the Final Price, updates the DB, and broadcasts updates to the Frontend. Admins create stocks/indexes (public can only trade). Below is a complete, one-file technical breakdown: cycles, APIs, schemas, messages, deployment, security, monitoring, and dev flow for Antigravity + Railway.
 
-You are building an "Everything Market": a platform where *anything* (people, trends, risks, outcomes) can be traded as an asset. Each asset has two separate price engines:
+1. High-level architecture (one-paragraph)
 
-* **Reality Engine (objective):** computes a Reality Score (0–100) based on measurable, external signals and oracles.
-* **Market Engine (subjective):** classic orderbook-based price coming from buyer/seller supply and demand.
-* **Final/Displayed Price:** a blend of the two (weighted combination) presented to users. The platform shows all three values: Reality Score, Market Price, Final Price.
+Four independent services (Railway-hosted, separate processes/containers) communicate over HTTP/WebSocket and a message queue (or direct HTTP with WebSocket broadcasts). Each service has a narrow responsibility:
 
-Goal: reduce pure-sentiment noise by anchoring tradable assets to objective, auditable, and anti-manipulation reality signals.
+reality-engine — scrapes sources, dedupes, embeds, quick-scores, runs tinyLLama for high-confidence events, produces impact per stock/index and posts to backend.
 
----
+orderbook — maintains in-memory/persistent orderbooks, matches orders, exposes aggregated market pressure (buy/sell counts, normalized MarketPrice) via API/WebSocket.
 
-# 2. Chosen approach & major design decisions
+backend — orchestrator: accepts reality impacts, fetches orderbook stats, computes FinalPrice (blend), persists scores and events, enforces anti-manipulation & admin flow, exposes REST/WS for frontend.
 
-1. **Two-layer price system** (Reality + Market) and blend into Final Price. Show all three to users for transparency.
-2. **Reality Engine** architecture: streaming pipeline that ingests a curated set of sources, filters/embeds items, runs cheap scorers, calls LLMs selectively for top events, aggregates weighted impacts, applies decay and smoothing, enforces anti-manipulation rules, and publishes RealityScore updates.
-3. **MVP goals & constraints:** Build cheaply (free-tier/service) and preferably on Railway for hosting. Avoid storing full archives; operate as a real-time/ephemeral pipeline with a sliding vector window. Persist only LLM summaries/major events + last RealityScores for audit.
-4. **Antigravity**: you plan to use Antigravity as your IDE/agent platform for scaffolding, development, and orchestration. Antigravity can run local editors and coordinate cloud model calls; still heavy model work will be cloud-backed.
+frontend — React (Vite) SPA: dashboard, order placement UI, realtime charts (Final/Reality/Market), admin interfaces to create stocks/indexes.
 
----
+Optional infra: Postgres (Railway DB) shared by backend and orderbook for persistence; Redis (optional) for queues, rate limits.
 
-# 3. MVP tech stack (recommended)
+2. Services & responsibilities (detailed)
+2.1 reality-engine
 
-## Frontend
+Purpose: ingest news, detect events relevant to your stocks/indexes, compute impact using tinyLLama + quick heuristics, publish event impacts.
 
-* **React (Vite)** for SPA dashboard.
-* **Charting:** Chart.js, or a TradingView embeddable if you want a more professional look for charts. Keep it lightweight for MVP.
+Major components
 
-## Backend / Pipeline (MVP, low-cost)
+scraper: respects robots.txt, uses RSS when available, polite throttle (per details.txt rules).
 
-* **Language:** Python 3.11
-* **Scraping / Feeds:** `feedparser`, `newspaper3k`, `Scrapy`, `Playwright` (only for JS-heavy pages). Start with RSS where available. Use Scrapy for domain-specific spiders.
-* **NLP & Embeddings:** `sentence-transformers` (all‑MiniLM‑L6‑v2) for embeddings; `spaCy` + `VADER` or simple heuristics for NER & sentiment.
-* **Vector Index:** FAISS (in-memory) for small-scale dedupe and similarity; keep a sliding window of recent vectors.
-* **LLM summarizer:** For MVP use local open-source inference (llama.cpp / small GGUF models or Mistral/Vicuna if you can host). Limit LLM calls to top events. Later you can use hosted Gemini/OpenAI if you need quality and scale.
-* **Orderbook / Matching Engine:** small open-source Python limit orderbook repo or custom simple engine (price-time priority, partial fills).
-* **API & Realtime:** FastAPI + WebSockets (Uvicorn) to stream RealityScore, MarketPrice, FinalPrice to frontend.
-* **DB / Persistence:** Railway Postgres for minimal persistence (LLM summaries, last RealityScores, config). Redis optional for queueing.
+prefilter: language detection, NER to map article to stock(s)/index(es).
 
-## Hosting & DevOps
+embed & dedupe: batch embed (all-MiniLM-L6-v2), normalized float32 vectors, FAISS in-memory windowed to 6 hours.
 
-* **Host:** Railway (free tier) for workers, Postgres, optional Redis. Antigravity for local development & agentic automation.
-* **Containerization:** Dockerfile for reproducibility (Playwright included only if necessary).
+quick_scorer: VADER/spaCy + keyword-based quick_score ∈ [-1,1].
 
----
+llm_runner: tinyLLama call only for groups passing thresholds (LLM_QUICK_THRESHOLD or multi-source); rate-limited via token bucket.
 
-# 4. Data pipeline & components (detailed)
+event_builder: computes event_points = event_weight * quick_score * 100 (then capped).
 
-1. **Sources config (`sources.yaml`)**: list of sources with `id`, `type` (rss/scrape/api), `url`, `weight`, `trust_score`.
+publisher: posts events/impacts to backend API endpoint.
 
-2. **Poller / Scraper** (every 3–10 min): read RSS and scrape fallback pages. Extract title, text, timestamp, url. Respect robots.txt and throttle requests.
+Outputs
 
-3. **Pre-filtering**: language detection, mention/NER check for target assets, keyword heuristics. Drop irrelevant items early.
+POST /api/v1/reality/events to backend with payload including event_id, stocks[], impact_points, summary, sources[], trusted_score, timestamp, llm_mode.
 
-4. **Embed & dedupe**: compute `all-MiniLM` embedding for each article. Compare against a sliding, in-memory vector index (FAISS or simple cosine list). Dedupe near-duplicates (similarity threshold e.g., 0.88).
+Env & constants
 
-5. **Quick Scorer** (cheap): run sentiment heuristics (VADER or simple token checks), NER relevance, keyword flags, source trust and independent-source count. Produce `quick_score` ∈ [-1,1].
+POLL_INTERVAL, LLM_MODE=local|tiny|heuristic, LLM_CALLS_PER_HOUR, SIMILARITY_DUPLICATE=0.88, SIMILARITY_GROUP=0.78, VECTOR_WINDOW_SECONDS=6*3600.
 
-6. **LLM aggregator (selective)**: call only when `|quick_score|` exceeds threshold or multiple independent sources report the same event. LLM outputs: short summary, numeric impact (e.g., ±X points over Y hours), and rationale. For MVP you may use a placeholder numeric impact derived from `quick_score * trust` if you want zero-cost.
+2.2 orderbook
 
-7. **Scoring engine**: convert event impacts into RealityPoints and update the per-stock Reality Score applying decay, caps, and EWMA smoothing. Keep audit logs for LLM calls only.
+Purpose: accept user orders, match trades, calculate MarketPrice and market pressure (supply/demand).
 
-8. **Orderbook engine**: handle limit/market orders, matching, trade events, best bid/ask. Compute MarketPrice (normalized 0..100 if needed).
+Major components
 
-9. **Final blending**: compute `FinalPrice = market_weight * MarketPrice + reality_weight * RealityScore` (both normalized). We suggested starting weights `market=0.6`, `reality=0.4` but these are tunable and can be dynamic.
+OrderBook engine (per-stock): in-memory structure persisted to Postgres for audit and crash recovery.
 
-10. **Publish** via WebSocket/REST to frontend.
+matching engine: price-time priority, partial fills allowed, deterministic trade IDs (UUID4), UTC timestamps.
 
----
+market_aggregator: computes normalized MarketPrice on 0..100 scale (MVP uses 0..100 directly).
 
-# 5. Concrete algorithms, constants & thresholds (MVP defaults)
+public APIs:
 
-## Quick Scorer (example formula)
+POST /api/v1/orders — place order
 
-```
-quick_score = clamp(
-  w_sentiment * sentiment_score +
-  w_ner * entity_relevance +
-  w_keywords * keyword_flag +
-  w_sources * min(1, sqrt(num_indep_sources)/2),
- -1, 1)
-```
+POST /api/v1/cancel — cancel order
 
-Example weights: `w_sentiment=0.4`, `w_ner=0.25`, `w_keywords=0.2`, `w_sources=0.15`.
+GET /api/v1/market/{stock_id}/snapshot — top-of-book + MarketPrice + depth
 
-## Event weighting
+WS /ws/orders — trade/orderbook events broadcasted
 
-```
-event_weight = source_trust * (1 + log(1 + num_related_docs)) * recency_factor
-recency_factor = exp(-(now - event_time)/tau)
-```
+metrics: total buys, total sells, net flow, liquidity depth
 
-Suggested `tau = 48 hours` for news recency.
+Outputs
 
-## Convert to RealityPoints
+GET /api/v1/market/{stock_id}/pressure — return {market_price, buy_volume, sell_volume, net_pressure, timestamp}
 
-```
-event_points = event_weight * quick_score * 100
-```
+Persistence
 
-## Apply update to Reality Score
+orders, trade_history tables in Postgres.
 
-* Cap single-event delta to `delta_cap = ±20 points`.
-* Smoothing with EWMA: `final_score = alpha * new_score + (1-alpha) * prev_score`, alpha ~0.25.
-* Clamp final score to `[0, 100]`.
+2.3 backend
 
-## LLM trigger & thresholds
+Purpose: central coordinator; receives reality impacts, queries orderbook, computes final price blend and persistence, handles admin flows.
 
-* `LLM_THRESHOLD` (quick_score magnitude) = 0.4–0.45.
-* Also trigger LLM when `>= 2` independent sources or aggregated quick_score > threshold.
+Major components
 
-## Anti-manipulation rules (MVP)
+API:
 
-* Require `min_independent_sources = 2` for any event that changes RealityScore by > X points.
-* `max_single_source_influence_per_day = 20%` of max_daily_move.
-* Use EWMA smoothing (alpha = 0.25) to prevent spike exploitation.
-* Flag >X point changes for human review in the UI (pending state) — recommended for demo.
+POST /api/v1/reality/ingest — accept reality-engine events
 
----
+GET /api/v1/stocks/{stock_id}/final — current final price & components
 
-# 6. Anti-manipulation & audit
+POST /api/v1/admin/stocks — create/edit stocks/indexes (admin only)
 
-* Use `sources.yaml` trust scores to downweight tabloids and fringe blogs.
-* Limit how much one domain can move a score in a day.
-* Require multiple independent sources for big moves.
-* Persist only LLM summaries + source URLs + numeric impacts for auditability (tiny DB footprint).
-* Keep an audit trail that includes the LLM reasoning so investors can review decisions.
+GET /api/v1/admin/pending — list pending audits
 
----
+POST /api/v1/admin/approve — approve audit
 
-# 7. Starter tech & open-source tools recommended
+WS /ws/updates — broadcast reality_update, market_update, final_update, audit_event
 
-**Scraping & ingestion**
+RealityEngineAdapter: validates incoming events, computes event_weight using constants, translates quick_score→points.
 
-* `feedparser` (RSS)
-* `newspaper3k` (article extraction)
-* `Scrapy` (spiders & pipelines)
-* `Playwright` (JS-heavy fallbacks)
-* `Pushshift` or `psaw` for Reddit
+Blender: FinalPrice = market_weight * MarketPrice + reality_weight * RealityScore (default market_weight=0.6, reality_weight=0.4).
 
-**NLP & embeddings**
+AntiManipulation: applies MIN_INDEP_SOURCES, SUSPICIOUS_DELTA, max_single_source_influence.
 
-* `sentence-transformers` / `all-MiniLM-L6-v2` (embeddings)
-* `spaCy` (NER)
-* `VADER` (sentiment) or simple heuristics
+Persistence: scores, events, llm_audit, score_changes, llm_calls tables.
 
-**Vector & dedupe**
+Workflow
 
-* `FAISS` (in-memory) or Chroma/Weaviate later
+Receive reality event.
 
-**LLM & summarization**
+Validate & compute delta = event_points (cap ±DELTA_CAP).
 
-* `llama.cpp` (local inference) for zero-cost summarization (limited quality)
-* Later: Gemini (Antigravity uses Gemini 3 Pro), OpenAI or hosted models for quality
+If suspicious, create llm_audit (pending), broadcast pending review.
 
-**Orderbook / matching**
+Else: call Orderbook /pressure, call Blender to compute FinalPrice, persist scores and score_changes.
 
-* small open-source Python limit-order-book projects or write simple engine
+Broadcast final_update via WS.
 
-**Runtime & deployment**
+Security
 
-* Railway (Postgres + Redis optional) for hosting & easy free tier
-* Docker for packaging
+Admin endpoints protected by X-ADMIN-KEY header.
 
----
+Validate signatures on reality-engine requests (HMAC or API Key).
 
-# 8. Railway deployment & operational notes (MVP)
+DB
 
-* Use Railway services for: `scraper-worker` (background worker or scheduled job), `api` (FastAPI + WebSockets), Postgres add-on (persist audit), optional Redis.
-* Railway envs: `DATABASE_URL`, `POLL_INTERVAL`, any API keys.
-* Use scheduled tasks or a continuous worker with `time.sleep(POLL_INTERVAL)`.
-* Keep Playwright usage minimal (large image & CPU). Prefer RSS + `newspaper3k` where possible.
-* Limit LLM calls (top N events per hour/day). Persist LLM outputs only.
+Postgres: stocks, scores, events, llm_audit, score_changes, orders (if orderbook shares DB).
 
----
+2.4 frontend
 
-# 9. Data retention strategy (keep it cheap)
+Purpose: user-facing dashboard and trading UI, admin panel for creating stocks/indexes.
 
-* **Ephemeral vectors:** keep a sliding window of recent vectors for dedupe (e.g., 6–24 hours). Evict older vectors.
-* **Persist only LLM summaries & audit items:** store `id, url, title, published, source_id, summary, impact, created_at` in Postgres (very small footprint).
-* **Store last RealityScore for continuity:** tiny JSON or a small table in Postgres.
+Major components
 
-This enables a low‑cost MVP and protects you from large DB bills and complexity.
+Dashboard shows: FinalPrice, RealityScore, MarketPrice, Chart (Chart.js), EventsList.
 
----
+Orderbook view & Order entry widget.
 
-# 10. Milestones & incremental plan (concrete)
+Admin UI: create stocks/indexes, review pending audits.
 
-**Milestone 0 — Repo + infra**
+WebSocket client to /ws/updates for live updates.
 
-* Create repo, Dockerfile, `sources.yaml`, README, Railway project.
+Actions
 
-**Milestone 1 — Scraper + prefilter + embed pipeline**
+Place buy/sell orders that hit orderbook API.
 
-* Implement poller reading RSS + `newspaper3k` extraction. Embed with `all-MiniLM` and in-memory dedupe (FAISS or list).
+Subscribe to selected stock via WS to get live final_update + event_summary.
 
-**Milestone 2 — Quick scorer + grouping**
+Permissions
 
-* Implement `quick_score` heuristics, vector clustering, and candidate events.
+Public users: trade only (no stock creation).
 
-**Milestone 3 — LLM summarizer + reality points**
+Admin users: create stocks & approve audits via Admin panel.
 
-* Integrate `llama.cpp` for summaries or keep heuristics for MVP. Implement `apply_event` to update RealityScore.
+3. Data & message contracts (JSON examples)
+3.1 Reality → Backend: POST /api/v1/reality/ingest
+{
+  "event_id": "uuid",
+  "timestamp": "2025-11-22T08:00:00Z",
+  "stocks": ["ELON","AI_INDEX"],
+  "quick_score": 0.72,
+  "impact_points": 28.8,
+  "summary": "Company X announced large AI contract; positive earnings guidance.",
+  "sources": [
+    {"id":"source1","url":"https://news.example/article1","trust":0.9}
+  ],
+  "num_independent_sources": 2,
+  "llm_mode": "tiny",
+  "raw_meta": {"title":"...","author":"..."}
+}
 
-**Milestone 4 — Orderbook engine & blending**
 
-* Implement basic limit order book and blending function.
+impact_points should already include event_weight * quick_score * 100 cut to ±DELTA_CAP.
 
-**Milestone 5 — API + frontend demo**
+3.2 Backend → Orderbook: GET /api/v1/market/{stock}/pressure
 
-* FastAPI + WebSocket feed, React demo UI: show RealityScore, MarketPrice, FinalPrice, top events.
+Response:
 
-**Milestone 6 — Anti-manipulation & audit**
+{
+  "stock": "ELON",
+  "market_price": 66.2,
+  "buy_volume": 120.5,
+  "sell_volume": 80.0,
+  "net_pressure": 40.5,
+  "timestamp": "2025-11-22T08:01:02Z"
+}
 
-* Implement manipulation rules, require multi-source confirmation for big moves, show LLM rationale and links in UI.
+3.3 Backend broadcast (WebSocket) messages
 
-**Milestone 7 — Polish for investor demo**
+reality_update:
 
-* Demo script: simulate one or two real events and show the flow: scrape → quick score → LLM summary → reality update → market reaction.
+{"type":"reality_update","stock":"ELON","reality_score":72.4,"delta":+2.4,"timestamp":"...","event_id":"..."}
 
----
 
-# 11. Starter repo skeleton (files to create)
+final_update:
 
-* `sources.yaml`
-* `scraper/poller.py` (RSS fetch + newspaper3k + dedupe)
-* `scraper/scraper_utils.py` (playwright fallback & helper functions)
-* `nlp/embed.py` (embedding wrapper)
-* `nlp/filters.py` (NER & sentiment helpers)
-* `store/index.py` (in-memory FAISS wrapper)
-* `scoring/quick_scorer.py`
-* `scoring/reality_engine.py`
-* `matching/orderbook.py`
-* `api/server.py` (FastAPI with websocket)
-* `frontend/` (React Vite app)
-* `Dockerfile` & `requirements.txt`
+{"type":"final_update","stock":"ELON","final_price":68.9,"components":{"market":66.2,"reality":72.4,"weights":{"market":0.6,"reality":0.4}},"timestamp":"..."}
 
-I previously provided a minimal `poller.py`, `scraper_utils.py` and `Dockerfile` example which you can paste into the repo as a working starting point.
 
----
+audit_event (pending):
 
-# 12. Example code snippets & pseudocode included in our convo
+{"type":"audit_event","event_id":"...","stock":"ELON","delta":20,"state":"pending_review"}
 
-We discussed several code snippets and pseudocode: the polling loop, quick scorer, vector dedupe flow, LLM call conditions, and scoring update pseudocode. Keep those snippets handy when implementing the files above (they were provided in the chat earlier).
+4. Cycles & sequences — full lifecycle (step-by-step)
 
----
+I'll describe three cycles: (A) Reality ingestion cycle; (B) Trading/orderbook cycle; (C) Blending & publish cycle. Each cycle shows responsibilities and handoffs.
 
-# 13. Scraper engine options recap
+4.A Reality ingestion cycle (scrape → impact → publish)
 
-* **Scrapy:** the recommended, robust framework for spiders per domain; extendable pipelines and middlewares.
-* **newspaper3k:** easy article extraction for many mainstream news sites.
-* **Playwright:** use only for JS-heavy fallbacks.
-* **Fundus:** a news-specific extractor if you want better-quality article extraction.
-* **AutoScraper / XPath Agent:** experimental/ML tools for auto-generating extractors — useful as accelerators but can be fragile.
+Scrape — reality-engine polls top-3 configured news sites (respecting crawl-delay) every POLL_INTERVAL (e.g., 300s). Use RSS first; fallback to newspaper3k → Playwright if needed.
 
-Recommendation: use Scrapy + `newspaper3k` first; Playwright only as fallback.
+Prefilter — title/text checked for mention of registered stocks/indexes via spaCy NER and keyword matching.
 
----
+Embed & dedupe — embed in batches; check FAISS for similarity > SIMILARITY_DUPLICATE=0.88. If duplicate, drop or group.
 
-# 14. Recommended starter sources (AI Risk Index MVP)
+Quick scoring — compute quick_score (0.4sentiment + 0.3keyword + 0.3*ner_relevance). Clamp [-1,1].
 
-* ArXiv (AI / CS RSS) — research signals
-* Hacker News — technical community reaction
-* r/MachineLearning (Pushshift) — research & developer sentiment
-* The Verge / Wired / NYTimes tech RSS — mainstream tech news
-* LLMarena / specialized forums — niche community signals
+Group — cluster similar docs (>=0.78) to increase num_related_docs. Compute event_weight.
 
-Suggested weights: ArXiv 0.2, HN 0.2, Reddit 0.2, mainstream 0.25, forums 0.15.
+LLM call (selective) — if |quick_score| >= LLM_QUICK_THRESHOLD or num_independent_sources >= MIN_INDEP_SOURCES, call tinyLLama (rate-limited). Parse JSON result: summary, impact_suggestion, rationale.
 
----
+Finalize impact — compute event_points = event_weight * quick_score * 100, cap ±DELTA_CAP, prepare event record.
 
-# 15. Next actions & options I can produce for you right now
+Publish — POST the event to backend /api/v1/reality/ingest with HMAC/API key.
 
-Choose one and I will generate it immediately (copy/paste ready):
+Output of this cycle: an event with impact_points per stock, persisted in events table on backend (or inserted by backend).
 
-A. Full starter repo skeleton with minimal implementations (`poller.py`, `embed.py`, `quick_scorer.py`, `reality_engine.py`, `orderbook.py`, `api/server.py`).
+4.B Trading / Orderbook cycle (user orders → matching → market snapshot)
 
-B. Exact Antigravity agent prompts to scaffold & implement Milestones 1–4 automatically.
+User submits order via Frontend → orderbook POST /api/v1/orders.
 
-C. Detailed `scoring/reality_engine.py` (production-ready with constants, unit tests, and tuning notes).
+Orderbook validates, inserts into DB (or memory + DB), attempts match:
 
-D. React demo UI skeleton (Vite + Charts + WebSocket hookup).
+Match occurs: create trade event(s) (UUID4), update orders, persist trade_history.
 
-E. `sources.yaml` with 8 recommended sources + trust weights for the AI Risk index.
+Partial fills tracked with filled amounts.
 
-Tell me which one to produce now (A/B/C/D/E) and I’ll generate it immediately.
+Orderbook computes aggregated market_price (0..100 or normalized mapping).
 
----
+Orderbook broadcasts market_update over its WS; backend can subscribe or poll market/pressure endpoint for each reality ingestion event.
 
-# 16. Final notes & advice
+Frontend receives updates and shows top-of-book, trade notifications.
 
-* Start small. Use 5–10 trusted sources and limit LLM calls. Focus on a single index (AI Risk) as your MVP demo.
-* Be transparent with users/investors: show RealityScore, MarketPrice, FinalPrice, and the LLM rationale + links.
-* Prioritize anti-manipulation and auditability — this is your product’s differentiator.
-* Use Antigravity to accelerate development (agentic workflows), Railway for hosting (free tier), and local open-source LLMs for zero-cost summarization during early demos.
+4.C Blending & publish cycle (backend core)
+
+Backend receives Reality event (4.A).
+
+Anti-manipulation check:
+
+If abs(delta) > SUSPICIOUS_DELTA or single-source caps violated:
+
+Insert audit row llm_audit (approved=false).
+
+Broadcast audit_event pending review (frontend admin sees it).
+
+Do not apply final reality change until admin approval.
+
+Else continue.
+
+Market pressure call:
+
+Call orderbook /api/v1/market/{stock}/pressure to fetch MarketPrice and volumes.
+
+Blending:
+
+FinalPrice = market_weight * MarketPrice + reality_weight * RealityScore (normalize both to same scale).
+
+Example: market=66.2, reality=72.4, weights (0.6,0.4) → final ≈ 68.92.
+
+Persist:
+
+Insert score_changes (old_score, new_score, delta, event_id).
+
+Update scores table with new RealityScore & final (backend centralizes final view).
+
+Broadcast:
+
+Send reality_update (if applicable), market_update (optional), and final_update via backend WS to frontend clients.
+
+Audit logging:
+
+Persist llm_call record if LLM was used: time, mode, truncated input, output hash.
+
+5. Stocks/index lifecycle & permissions
+
+Admin-created only (your product controls which assets exist). Admins create stocks records in DB via POST /api/v1/admin/stocks.
+
+Stock record includes metadata: {symbol, name, description, denom, min_price, max_price, market_weight, reality_weight, initial_score}.
+
+Public users: register & trade against existing stocks only. They cannot create assets.
+
+Indexes: composed assets (e.g., AI_INDEX) — Reality Engine maps articles to one or more underlying stocks and index logic is computed as weighted average of sub-assets.
+
+6. Database schema (core tables) — simplified
+-- stocks
+stocks(symbol PK, name, description, min_price, max_price, market_weight, reality_weight, created_at)
+
+-- scores
+scores(symbol PK, reality_score float, final_price float, confidence float, last_updated timestamptz)
+
+-- events
+events(id PK, symbol, impact_points float, quick_score float, summary text, sources jsonb, created_at timestamptz, processed boolean, llm_mode text)
+
+-- llm_audit
+llm_audit(id PK, event_id FK, symbol, summary, impact float, sources jsonb, created_at timestamptz, approved boolean, approved_by text, approved_at timestamptz)
+
+-- score_changes
+score_changes(id PK, symbol, old_score float, new_score float, delta float, event_id FK, timestamp timestamptz)
+
+-- orders (orderbook)
+orders(order_id PK, user_id, symbol, side, type, price float, qty float, filled float, status text, created_at timestamptz)
+
+-- trade_history
+trade_history(trade_id PK, buy_order_id FK, sell_order_id FK, symbol, price float, qty float, timestamp timestamptz)
+
+-- llm_calls
+llm_calls(id PK, event_id FK, llm_mode, input_hash, output_json jsonb, timestamp)
+
+7. Key constants (single-source, shared config)
+
+Place these in config/constants.py and load as env overrides:
+
+SIMILARITY_DUPLICATE = 0.88
+SIMILARITY_GROUP = 0.78
+LLM_QUICK_THRESHOLD = 0.45
+VECTOR_WINDOW_SECONDS = 6*3600
+TAU_SECONDS = 48*3600
+DELTA_CAP = 20
+EWMA_ALPHA = 0.25
+MIN_INDEP_SOURCES = 2
+LLM_CALLS_PER_HOUR = 10
+SUSPICIOUS_DELTA = 15
+
+8. Security, signing, and auth
+
+Reality → Backend: require HMAC signature header X-SIGNATURE computed with shared REALITY_API_SECRET to prevent spoofing.
+
+Admin endpoints: require X-ADMIN-KEY header; validate using constant-time compare.
+
+Frontend auth: JWT for logged-in users; short-lived tokens for WS. Do not store admin keys client-side.
+
+Rate limits & quotas: implement per-IP and per-service rate limiting; especially enforce LLM_CALLS_PER_HOUR in reality-engine.
+
+9. Deployment on Railway (4 services)
+
+Project: everything-market
+
+Service: reality-engine
+
+Dockerfile: includes Python + playwright optional + tinyLLama binary if using local inference.
+
+Start command: python -m app.reality.main
+
+Env: DATABASE_URL, REALITY_API_SECRET, POLL_INTERVAL, LLM_MODE, LLM_CALLS_PER_HOUR.
+
+Scale: 1 worker. Use Railway schedule or always-on process.
+
+Service: orderbook
+
+Dockerfile: Python service.
+
+Start command: uvicorn app.orderbook:app --host 0.0.0.0 --port $PORT
+
+Env: DATABASE_URL, ADMIN_API_KEY (if orderbook admin ops needed).
+
+Service: backend
+
+Dockerfile + Uvicorn.
+
+Start command: uvicorn app.backend:app --host 0.0.0.0 --port $PORT
+
+Env: DATABASE_URL, ADMIN_API_KEY, REALITY_API_SECRET (shared with reality-engine), LLM_MODE=heuristic (for demo), MIN_INDEP_SOURCES, SUSPICIOUS_DELTA.
+
+Service: frontend
+
+Static hosting (Railway static or Netlify/Vercel), or Docker running Vite preview for dev. Build step outputs static assets served via CDN.
+
+Networking & connectivity
+
+Use private environment variables and Railway plugin to provide DATABASE_URL.
+
+Configure internal connectivity: reality-engine → backend (HTTP). backend → orderbook (HTTP). backend → frontend (WS push) OR direct WS on backend.
+
+10. Admin & audit workflow (human in the loop)
+
+Reality engine sends large impact → backend flags |delta|>SUSPICIOUS_DELTA.
+
+Backend creates llm_audit row and sets event state pending_review.
+
+Admin receives notification in UI and checks:
+
+LLM summary, sources list (URLs), truncated raw text if allowed, quick_score, source trust values.
+
+Admin approves/rejects via Admin UI:
+
+POST /api/v1/admin/approve with {event_id, approve:true, admin_id}.
+
+If approved: apply event and broadcast final_update.
+
+If rejected: mark audit approved=false, do not apply. Optionally, create an explanation entry.
+
+11. Frontend UX flows (what user sees)
+
+Dashboard: choose stock → shows three numbers (Reality, Market, Final), chart plotting FinalPrice (with overlay lines for Reality & Market), events list with LLM rationales (if small).
+
+Trading widget: place limit/market orders, view orderbook, recent trades.
+
+Admin panel: create stock, view pending audits, approve events.
+
+Realtime behavior: when a reality event occurs, show a transient toast + push to EventsList; FinalPrice animates smoothly to new value (use easing to show EWMA effect).
+
+12. Observability & monitoring
+
+Logs: structured JSON logs with service, event_id, symbol.
+
+Metrics:
+
+Reality events/hour, LLM calls/hour, rate-limiter hits
+
+Order volume/day, matching latency
+
+WS client count
+
+Memory & CPU usage of FAISS + LLM binary
+
+Alerts: threshold alerts for LLM calls per hour, scraper 403/429 rates, DB errors, high SUSPICIOUS_DELTA events.
+
+Tracing: optional distributed tracing across reality→backend→orderbook.
+
+13. Testing & CI (recommended)
+
+Unit tests for: quick_scorer, embed_text (deterministic), vector_index (eviction), reality_engine.apply_event, orderbook.matching.
+
+Integration tests: simulate a full cycle:
+
+Insert two news items into reality-engine sources (mock).
+
+Check backend receives event, orderbook returns pressure.
+
+Validate final price computed correctly.
+
+CI (GitHub Actions): run pytest, build Docker images, but do not auto-deploy — follow Railway manual link flow.
+
+14. Implementation notes & gotchas
+
+Keep LLM calls minimal: LLM cost & latency are the biggest risk. Use heuristic LLM_MODE for demo; enable tinyLLama only for high-value runs and run offline or on separate worker.
+
+FAISS memory: evict vectors older than VECTOR_WINDOW_SECONDS to bound memory.
+
+Atomic updates: apply apply_event in a DB transaction — insert score_changes and update scores atomically.
+
+Timezones: store & display UTC ISO8601 only; convert in frontend.
+
+Scaling: split reality-engine scraping and LLM-run tasks into separate worker processes if LLM is heavy.
+
+Ensure idempotency: use make_id(url, published) and check unique constraint on events to avoid duplicates.
+
+15. Developer workflow with Antigravity (how to orchestrate)
+
+One PR per feature (prompts in prompts.txt map to branches).
+
+Use Antigravity to scaffold repo and agents to implement prompts 1–10 (but ensure human review for anything touching LLM or anti-manipulation).
+
+Local dev:
+
+Run orderbook, backend, reality-engine as separate local processes (or use docker-compose with four services but ensure Playwright and LLama binaries are optional).
+
+Deploy to Railway:
+
+Create Railway project → add Postgres plugin → create 4 services and link repo.
+
+Set env vars in Railway dash for each service (e.g., REALITY_API_SECRET, ADMIN_API_KEY, POLL_INTERVAL).
+
+PR gating: require CI tests; do not merge dev → main without passing CI.
+
+16. Example sequence diagram (textual)
+[Scraper] --(news items)--> [Reality Engine Prefilter]
+[Reality Engine] --(embed/dedupe/quick_score)--> (maybe LLM)
+[Reality Engine] --(POST /api/v1/reality/ingest)--> [Backend]
+[Backend] --(validate & anti-manipulation)--> (if suspicious) -> [LLM_AUDIT]
+[Backend] --(GET /market/pressure)--> [Orderbook]
+[Backend] --(compute final)--> [DB persist]
+[Backend] --(WS broadcast)--> [Frontend clients]
+[Frontend] --(user order)--> [Orderbook] --> [Backend receives market_update via API/WS]
