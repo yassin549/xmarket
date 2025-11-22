@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: everything_market
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/everything_market
+      REALITY_API_SECRET: dev-reality-secret
+      ADMIN_API_KEY: dev-admin-key
+      JWT_SECRET: dev-jwt-secret
+      ORDERBOOK_URL: http://orderbook:8001
+      DEBUG: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config
+
+  orderbook:
+    build:
+      context: .
+      dockerfile: orderbook/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/everything_market
+      DEBUG: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config
+
+  reality-engine:
+    build:
+      context: .
+      dockerfile: reality-engine/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/everything_market
+      REALITY_API_SECRET: dev-reality-secret
+      BACKEND_URL: http://backend:8000
+      POLL_INTERVAL: "300"
+      LLM_MODE: heuristic
+      DEBUG: "true"
+    depends_on:
+      - backend
+    volumes:
+      - ./config:/app/config
+      - ./reality-engine/sources.yaml:/app/sources.yaml
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "3000:80"
+    environment:
+      VITE_BACKEND_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000/ws/updates
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:

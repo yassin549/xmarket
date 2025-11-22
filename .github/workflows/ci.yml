@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Run tests
+      run: |
+        cd backend
+        pytest tests/ -v --cov=app --cov-report=term-missing
+    
+    - name: Check code compilation
+      run: |
+        python -m compileall backend/app
+
+  test-orderbook:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd orderbook
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+    
+    - name: Run tests
+      run: |
+        cd orderbook
+        pytest tests/ -v --cov=app --cov-report=term-missing
+    
+    - name: Check code compilation
+      run: |
+        python -m compileall orderbook/app
+
+  test-reality-engine:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd reality-engine
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+        python -m spacy download en_core_web_sm
+    
+    - name: Run tests
+      run: |
+        cd reality-engine
+        pytest tests/ -v --cov=app --cov-report=term-missing
+    
+    - name: Check code compilation
+      run: |
+        python -m compileall reality-engine/app
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm install
+    
+    - name: Build
+      run: |
+        cd frontend
+        npm run build
+    
+    - name: Lint
+      run: |
+        cd frontend
+        npm run lint
+
+  security-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check for secrets in code
+      run: |
+        ! grep -r "REALITY_API_SECRET.*=" --include="*.py" --exclude-dir=".git" || exit 1
+        ! grep -r "ADMIN_API_KEY.*=" --include="*.py" --exclude-dir=".git" || exit 1
+        echo "✅ No hardcoded secrets found"
