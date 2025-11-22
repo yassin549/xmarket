@@ -11,11 +11,13 @@ This is the central backend service that:
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.ingest import router as ingest_router
+from backend.admin import router as admin_router
+from backend.public_api import router as public_router
 
 # Create FastAPI application
 app = FastAPI(
     title="Everything Market Backend",
-    version="0.3.0",
+    version="0.5.0",
     description="Reality event ingestion and market coordination service",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -32,6 +34,8 @@ app.add_middleware(
 
 # Include routers
 app.include_router(ingest_router)
+app.include_router(admin_router)
+app.include_router(public_router)
 
 
 # ============================================================================
