@@ -19,9 +19,6 @@ RUN python -m spacy download en_core_web_sm
 # Copy application code
 COPY . .
 
-# Copy shared config from parent
-COPY ../config /app/config
-
 # Copy sources configuration
 COPY sources.yaml /app/sources.yaml
 
