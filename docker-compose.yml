@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: xmarket-postgres
+    environment:
+      POSTGRES_USER: xmarket
+      POSTGRES_PASSWORD: xmarket_dev_password
+      POSTGRES_DB: xmarket
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xmarket"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: xmarket-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Backend Service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: xmarket-backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://xmarket:xmarket_dev_password@postgres:5432/xmarket
+      REDIS_URL: redis://redis:6379/0
+      REALITY_API_SECRET: dev_secret_12c894cb811503af1845b0d7560fc334afe5326a39f63456a87158fa68f68ded
+      ADMIN_API_KEY: dev_admin_ec3f3e64567921df0414ab763b9a9bf0a0ab4d0a72a7dd4fb50d06b71c34a822
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - ./config:/app/config
+      - ./database.py:/app/database.py
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Orderbook Service
+  orderbook:
+    build:
+      context: .
+      dockerfile: Dockerfile.orderbook
+    container_name: xmarket-orderbook
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql://xmarket:xmarket_dev_password@postgres:5432/xmarket
+      PORT: 8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./orderbook:/app/orderbook
+      - ./config:/app/config
+      - ./database.py:/app/database.py
+    command: uvicorn orderbook.main:app --host 0.0.0.0 --port 8001 --reload
+
+  # Reality Engine
+  reality-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.reality-engine
+    container_name: xmarket-reality-engine
+    environment:
+      DATABASE_URL: postgresql://xmarket:xmarket_dev_password@postgres:5432/xmarket
+      REDIS_URL: redis://redis:6379/0
+      REALITY_API_SECRET: dev_secret_12c894cb811503af1845b0d7560fc334afe5326a39f63456a87158fa68f68ded
+      BACKEND_URL: http://backend:8000
+      POLL_INTERVAL: 300
+      LLM_MODE: tinyLLama
+      LLM_CALLS_PER_HOUR: 10
+      LLM_DEVICE: cpu
+    depends_on:
+      backend:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./reality_engine:/app/reality_engine
+      - ./config:/app/config
+      - ./database.py:/app/database.py
+    command: python reality_engine/run.py --backend-url http://backend:8000 --verbose
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: xmarket-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_BACKEND_URL: http://localhost:8000
+      VITE_ORDERBOOK_URL: http://localhost:8001
+    depends_on:
+      - backend
+      - orderbook
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+
+volumes:
+  postgres_data:
