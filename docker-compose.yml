@@ -99,7 +99,7 @@ services:
       - ./reality_engine:/app/reality_engine
       - ./config:/app/config
       - ./database.py:/app/database.py
-    command: python reality_engine/run.py --backend-url http://backend:8000 --verbose
+    command: python -m reality_engine.run --backend-url http://backend:8000 --verbose
 
   # Frontend
   frontend:
