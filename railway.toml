@@ -26,6 +26,21 @@ healthcheckPath = "/health"
 [services.env]
 PORT = "8001"
 
+# Reality Engine Service
+[[services]]
+name = "reality-engine"
+source = "./reality_engine"
+
+[services.env]
+PORT = "8002"
+DATABASE_URL = "${{Postgres.DATABASE_URL}}"
+REALITY_API_SECRET = "${{REALITY_API_SECRET}}"
+BACKEND_URL = "${{RAILWAY_BACKEND_URL}}"
+REDIS_URL = "${{Redis.REDIS_URL}}"
+POLL_INTERVAL = "300"
+LLM_MODE = "tinyLLama"
+LLM_CALLS_PER_HOUR = "10"
+
 # Frontend Service
 [[services]]
 name = "frontend"

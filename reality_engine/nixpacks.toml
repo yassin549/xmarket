@@ -1,4 +1,5 @@
 # Nixpacks configuration for Reality Engine
+# This service runs as a standalone Python application
 
 [phases.setup]
 nixPkgs = ["python312", "gcc"]
@@ -7,4 +8,4 @@ nixPkgs = ["python312", "gcc"]
 cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "bash start.sh"
+cmd = "python run.py --backend-url $BACKEND_URL --verbose"

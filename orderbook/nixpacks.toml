@@ -1,10 +1,10 @@
-# Nixpacks configuration for Orderbook
+# Nixpacks configuration for Orderbook service
 
 [phases.setup]
-nixPkgs = ["python312"]
+nixPkgs = ["python312", "gcc"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["pip install -r ../requirements.txt"]
 
 [start]
-cmd = "python -m uvicorn main:app --host 0.0.0.0 --port $PORT"
+cmd = "cd .. && uvicorn orderbook.main:app --host 0.0.0.0 --port $PORT"
