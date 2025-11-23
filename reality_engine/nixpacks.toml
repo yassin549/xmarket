@@ -1,13 +1,10 @@
 # Nixpacks configuration for Reality Engine
-# https://nixpacks.com/docs/configuration/file
 
 [phases.setup]
 nixPkgs = ["python312", "gcc"]
 
 [phases.install]
-cmds = [
-  "pip install -r ../requirements.txt"
-]
+cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "python run.py --backend-url $BACKEND_URL"
+cmd = "bash start.sh"
