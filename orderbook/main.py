@@ -211,3 +211,13 @@ def get_pressure(symbol: str):
         market_price=metrics["market_price"],
         timestamp=datetime.now()
     )
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint for Railway monitoring."""
+    return {
+        "status": "healthy",
+        "service": "orderbook",
+        "version": "0.1.0"
+    }
+

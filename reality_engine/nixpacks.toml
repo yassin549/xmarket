@@ -8,4 +8,5 @@ nixPkgs = ["python312", "gcc"]
 cmds = ["pip install -r requirements.txt"]
 
 [start]
-cmd = "python run.py --backend-url $BACKEND_URL --verbose"
+cmd = "/app/.venv/bin/python run.py --backend-url $BACKEND_URL --verbose"
+
