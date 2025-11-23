@@ -1,4 +1,4 @@
-# Backend Dockerfile for local development
+# Backend Dockerfile for Railway deployment
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -9,15 +9,19 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy backend requirements (minimal dependencies)
+COPY backend/requirements.txt backend/requirements.txt
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
 # Copy application code
-COPY . .
+COPY backend ./backend
+COPY config ./config
+COPY database.py .
+COPY migrations ./migrations
+COPY alembic.ini .
 
 # Expose port
 EXPOSE 8000
 
-# Default command (can be overridden in docker-compose)
+# Default command
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

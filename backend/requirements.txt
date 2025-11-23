@@ -1,16 +1,24 @@
-# Orderbook Service - Minimal Dependencies
-# ~30MB total (no ML libraries needed!)
+# Backend Service - Minimal Dependencies
+# ~50MB total (vs 4GB with ML libraries)
 
 # Core Framework
 fastapi>=0.108.0
 uvicorn[standard]>=0.25.0
+python-multipart>=0.0.6
 
 # Database
 sqlalchemy>=2.0.23
+alembic>=1.13.0
 psycopg2-binary>=2.9.9
 
 # Environment & Config
 python-dotenv>=1.0.0
+
+# HTTP Client (for communicating with other services)
+httpx>=0.26.0
+
+# Redis
+redis>=5.0.0
 
 # Testing (dev only, but keeping for CI/CD)
 pytest>=7.4.0
@@ -18,3 +26,6 @@ pytest-cov>=4.1.0
 
 # Data Validation
 pydantic>=2.0.0
+
+# JSON Schema
+jsonschema>=4.20.0

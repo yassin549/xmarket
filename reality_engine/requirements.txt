@@ -1,31 +1,51 @@
+# Reality Engine - Full ML Dependencies
+# This service actually needs all the ML libraries
+
+# Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0
+
+# Environment & Config
 python-dotenv>=1.0.0
+
+# Database
 alembic>=1.13.0
 psycopg2-binary>=2.9.9
 sqlalchemy>=2.0.23
+
+# API Framework (for health checks if needed)
 fastapi>=0.108.0
 uvicorn[standard]>=0.25.0
 python-multipart>=0.0.6
+
+# HTTP Client
 httpx>=0.26.0
+
+# Web Scraping
 feedparser>=6.0.10
 newspaper3k>=0.2.8
 playwright>=1.40.0
 pyyaml>=6.0.1
 langdetect>=1.0.9
 requests>=2.31.0
+
+# ML & Embeddings
 sentence-transformers>=2.2.2
 faiss-cpu>=1.7.4
 numpy>=1.24.0
+
+# NLP
 vaderSentiment>=3.3.2
 spacy>=3.7.0
 transformers>=4.35.0
 torch>=2.0.0
+
+# Redis
 redis>=5.0.0
 fakeredis>=2.20.0
+
+# Validation
 jsonschema>=4.20.0
 
 # ML Dependencies
-torch>=2.0.0
-transformers>=4.35.0
 accelerate>=0.24.0
