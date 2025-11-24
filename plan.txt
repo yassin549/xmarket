@@ -1,574 +1,341 @@
-# Everything Market — Master Plan
+# Final Master Plan — *Everything Market* (Vercel-first + Hugging Face LLM)
 
-**Purpose:** This is the single canonical engineering plan for the Everything Market. It is the authoritative, principles-based document to use throughout development and operations. Use this file for design decisions, agent prompts, PR reviews, and operational runbooks.
-
-> IMPORTANT: Antigravity agents and any automated code generators **must never** create or seed premade stocks, indexes, or market content in the repository or in any staging/demo environment. Stocks and indexes are **always** created by authenticated human admins only. Any agent that attempts to generate premade asset content will be considered a policy violation.
+This is the **final, simplified, action-oriented masterplan**. It fixes the problems we flagged, uses a hybrid serverless + small dedicated host approach (dedicated orderbook + Playwright runner), specifies Hugging Face as the LLM provider (use hosted endpoints or community free API models where available), and reorganizes **stocks/indexes by category** for a clean user experience. I keep principles, concrete artifacts, config, and a tight roadmap so you can implement straight away.
 
 ---
 
-# 1. High-level principles (the north star)
+# 1 — Guiding Principles (short & binding)
 
-1. **Determinism & reproducibility.** All core scoring, embedding, and blending operations are deterministic—no heuristics or stochastic fallbacks in production. Seed any pseudo-random operations in tests; production code should avoid randomness for scoring.
-2. **Auditable decisions.** Every impactful decision (LLM summary, score change > SUSPICIOUS_DELTA, admin approval) is persisted in the DB with provenance: inputs (truncated), source list, timestamp (UTC), LLM mode, and output hash.
-3. **Minimal persisted raw data.** Do not store raw HTML or full scraped pages persistently. Persist only what is required: metadata (url, title, published), summary, event id, and LLM summaries/impacts. Raw extracted text is ephemeral unless explicitly required and approved by legal.
-4. **Single authoritative pipeline.** Reality evaluation is handled exclusively by the Reality Engine. There is one canonical pipeline for ingestion → embedding → scoring → LLM analysis → publisher. No alternate heuristic subsystem in production.
-5. **Human-in-the-loop for large changes.** Any change that can move a score by more than `SUSPICIOUS_DELTA` (default 15 points) must create an audit entry and require manual admin approval before broadcasting as final.
-6. **Security-first.** Sign all Reality Engine → Backend requests, protect admin endpoints with secret keys, validate all inputs strictly with Pydantic, and avoid exposing secrets in logs.
-7. **Privacy & legal compliance.** Respect robots.txt, Do Not Track polite scraping rules, and document ToS restrictions and retention policies in `docs/legal.md`.
-
----
-
-# 2. System architecture overview
-
-**Railway Services (4 primary services):**
-
-* `reality-engine` — ingests news, computes embeddings, runs the tinyLLama LLM, computes event impacts, publishes signed events to backend.
-* `orderbook` — matching engine, accepts/cancels orders, outputs market_price & pressure metrics, persists trades and orders history.
-* `backend` — central coordinator, anti-manipulation, blender (Reality + Market), persistence, WS broadcasts, admin flows.
-* `frontend` — Vite + React app served by static host/CDN (or Railway static); consumes WS updates, provides trading UI and admin panels.
-
-**Supporting infra:**
-
-* PostgreSQL (Railway Postgres plugin) — main authoritative store.
-* Redis — short-lived caches, rate limiter, token-bucket for LLM calls, and pub/sub if needed for internal broadcasts.
-* (Optional) Object storage for snapshots (S3-compatible) — for export snapshots only.
-
-**Communication pattern:**
-
-* `reality-engine` → `backend` : signed HTTP POST `/api/v1/reality/ingest`.
-* `backend` ↔ `orderbook` : HTTP queries to `/api/v1/market/{symbol}/pressure` and event subscription (backend may subscribe to orderbook WS events) for reactive updates.
-* `backend` → `frontend` : WS broadcast of `reality_update`, `market_update`, `final_update`, and `audit_event`.
-
-All services run as separate Railway services with explicit env variables and permissions.
+1. **Determinism & Reproducibility:** every published market event is reproducible from `snapshots + ingest logs + config`.
+2. **Auditability & Immutability:** every state change creates an append-only `audit_event` with signer, ts, job_id, and HMAC.
+3. **Human-in-the-loop for creation:** no automated agent may create stocks/indexes/events without a signed human admin audit_event.
+4. **Simplicity & Minimal State:** serverless for stateless; one small dedicated service for low-latency stateful (orderbook).
+5. **Idempotency & Exactly-once where needed:** every external ingest/job has `idempotency_key` and tracked in `jobs` table.
+6. **Security-first:** HMAC for inter-service auth, nonce+ts replay protection, Vault/Secrets for keys, RBAC.
+7. **LLM provenance:** any LLM output used must include verifiable `snapshot_id` references (content-addressed).
+8. **User-first organization:** markets grouped by well-defined categories (political, social, economic, tech, sports, culture) and easy discovery.
+9. **Observable & Testable:** SLIs defined for ingest freshness, orderbook latency, embedding queue, LLM success; automated restore tests.
 
 ---
 
-# 3. Core constants & configuration (single source of truth)
+# 2 — Architecture (concise)
 
-Create `config/constants.py` and load in all services.
+* **Vercel**: frontend (Next.js) + serverless/edge functions (auth, ingest API, admin, blending triggers, read endpoints).
+* **Dedicated hosts** (small container/VM):
 
-```py
-SIMILARITY_DUPLICATE = 0.88
-SIMILARITY_GROUP = 0.78
-LLM_QUICK_THRESHOLD = 0.45
-VECTOR_WINDOW_SECONDS = 6 * 3600
-TAU_SECONDS = 48 * 3600
-DELTA_CAP = 20
-EWMA_ALPHA = 0.25
-MIN_INDEP_SOURCES = 2
-LLM_CALLS_PER_HOUR = 10
-SUSPICIOUS_DELTA = 15
-USER_AGENT = "EverythingMarketBot/0.1 (+mailto:ops@yourdomain.com)"
-```
-
-Environment variables (examples; read by `config/env.py`):
-
-* `DATABASE_URL` (Postgres)
-* `REDIS_URL`
-* `REALITY_API_SECRET` (HMAC secret)
-* `ADMIN_API_KEY`
-* `POLL_INTERVAL` (int seconds)
-* `LLM_MODE` (tinyLLama)
-* `LLM_CALLS_PER_HOUR`
+  * `orderbook-service` (in-memory matching + WAL + snapshot to object storage)
+  * `playwright-runner` (headless browser pool for heavy scraping)
+* **Managed services**: Neon/Supabase Postgres, Upstash (Redis-like), Vector DB (Pinecone/Supabase Vector), S3-compatible object store, Realtime (Ably/Pusher/Supabase Realtime).
+* **LLM & Embeddings**: Hugging Face Inference API (preferred); fallback to managed OpenAI/Replicate if required. Embedding model choices and batch strategy configurable.
+* **Secrets**: Vercel Secrets + HashiCorp Vault for high-risk keys.
 
 ---
 
-# 4. PostgreSQL schema & data design
+# 3 — Stocks / Indexes taxonomy (user-facing)
 
-Use Alembic migrations and schema versioning under `migrations/`.
+All markets (stocks/indexes/events) must be assigned a **type** at creation. Types drive discovery, moderation, and anti-manipulation rules.
 
-## Key tables (columns simplified)
+Primary types:
 
-* `stocks` (managed by admin only)
+* `political` — elections, policy outcomes, geopolitics
+* `economic` — CPI, unemployment, economic indicators, macro events
+* `social` — viral trends, social sentiment, platform metrics (followers, trends)
+* `technology` — product launches, company milestones, model releases
+* `finance` — securities, crypto, commodities indices (not real securities trading)
+* `culture` — awards, entertainment, cultural events
+* `sports` — matches, tournaments, outcomes
 
-  * `symbol` PK (text)
-  * `name` text
-  * `description` text
-  * `market_weight` float (0..1)
-  * `reality_weight` float (0..1)
-  * `min_price` float, `max_price` float
-  * `created_at` timestamptz
+Each market has metadata:
 
-* `scores`
+* `type` (one of above)
+* `subtype` (free text or enumerated for filters)
+* `region` (country or global)
+* `risk_level` (human-assigned: low/medium/high)
+* `created_by` (admin id)
+* `human_approval_audit_id` (audit_event id)
 
-  * `symbol` FK -> `stocks.symbol`
-  * `reality_score` float (0..100)
-  * `final_price` float (0..100)
-  * `confidence` float (0..1)
-  * `last_updated` timestamptz
+UI consequences:
 
-* `events`
-
-  * `id` PK uuid
-  * `event_id` unique text (from reality-engine)
-  * `symbol` text
-  * `impact_points` float
-  * `quick_score` float
-  * `summary` text
-  * `sources` jsonb
-  * `llm_mode` text
-  * `created_at` timestamptz
-  * `processed` boolean
-
-* `llm_calls`
-
-  * `id` uuid
-  * `event_id` FK
-  * `llm_mode` text
-  * `input_hash` text
-  * `output_json` jsonb
-  * `timestamp` timestamptz
-
-* `llm_audit`
-
-  * `id` uuid
-  * `event_id` FK
-  * `symbol` text
-  * `summary` text
-  * `impact` float
-  * `sources` jsonb
-  * `approved` boolean
-  * `approved_by` text
-  * `created_at` timestamptz
-  * `approved_at` timestamptz NULLABLE
-
-* `score_changes`
-
-  * `id` uuid
-  * `symbol` text
-  * `old_score` float
-  * `new_score` float
-  * `delta` float
-  * `event_id` FK
-  * `timestamp` timestamptz
-
-* `orders` (orderbook)
-
-  * `order_id` uuid
-  * `user_id` text
-  * `symbol` text
-  * `side` buy/sell
-  * `type` limit/market
-  * `price` float
-  * `qty` float
-  * `filled` float
-  * `status` enum
-  * `created_at` timestamptz
-
-* `trade_history`
-
-  * `trade_id` uuid
-  * `buy_order_id`, `sell_order_id`
-  * `symbol`, `price`, `qty`, `timestamp`
-
-**Indexes & constraints**: unique on `events.event_id`, indexes on `scores.symbol`, `orders.symbol` and `trade_history.symbol` for fast lookups.
-
-**Transactions**: Always wrap `apply_event` flows in transactions that update `scores` and insert into `score_changes` to preserve atomicity.
+* Filter by type in discover pages.
+* Each type has tailored onboarding copy & moderation thresholds (e.g., political has higher human review).
+* Type-specific anti-manipulation rules (e.g., stricter source-reputation and delay windows for `political`).
 
 ---
 
-# 5. Redis roles & usage
+# 4 — Contracts & Key Schemas (copy/paste ready)
 
-**Primary uses:**
+## 4.1 Realtime message schema (per-channel)
 
-* Token-bucket rate limiting for LLM calls (`LLM_CALLS_PER_HOUR`). Use a Redis key per environment to allow cross-worker rate limiting.
-* Short-lived cache for embeddings & query results (TTL smaller than `VECTOR_WINDOW_SECONDS`).
-* Pub/Sub for internal notifications between `backend` and `orderbook` (optional, use if you want near-zero latency internal wiring). Prefer HTTP calls for clarity.
-* Distributed locks for single-writer operations (e.g., per-symbol `apply_event` lock during scoring updates to avoid races).
-
-**Keys & TTLs:**
-
-* `llm:token_bucket` -> tokens, refill schedule.
-* `embed_cache:<text_hash>` TTL ~ `VECTOR_WINDOW_SECONDS`.
-* `lock:apply_event:<symbol>` TTL 30s.
-
-**Failure modes:** If Redis unavailable, fall back to local in-process limiter (best-effort) but log & alert — do not allow LLM calls to proceed unchecked.
-
----
-
-# 6. Reality Engine — design & pipeline details
-
-**Goal:** deterministic, auditable event detection and impact computation using tinyLLama for canonical analysis.
-
-## Steps (per fetched article/batch)
-
-1. **Fetch & normalize**: RSS preferred. For HTML extraction use `newspaper3k`, then Playwright fallback only when needed. Use `USER_AGENT` header and `From` header where allowed.
-2. **Robots & throttle**: Check `robots.txt` before crawling; respect `crawl-delay` and per-domain throttle (default 1 request / 30s). Use persistent small cache for robots.txt per domain.
-3. **Prefilter**: language detection, minimum content length, entity mention detection (spaCy). Map mentions to existing `stocks` symbols using deterministic rules (exact match OR known aliases table in DB).
-4. **Embedding & dedupe**: batch embed texts using `sentence-transformers/all-MiniLM-L6-v2`. Normalize vectors (L2), dtype float32. Query FAISS index; if similarity > `SIMILARITY_DUPLICATE` drop (duplicate). Otherwise group into clusters at `SIMILARITY_GROUP` for LLM aggregation.
-5. **Quick scoring**: deterministic `quick_score` formula: `0.4*sentiment + 0.3*keyword_score + 0.3*ner_relevance`, clamp to [-1,1]. Use spaCy NER and a fixed keyword list. Use VADER or a deterministic sentiment module; do not rely on unstable external heuristics.
-6. **LLM call (tinyLLama)**: if group meets thresholds (`|quick_score| >= LLM_QUICK_THRESHOLD` or `num_independent_sources >= MIN_INDEP_SOURCES`) then call tinyLLama with a carefully formatted prompt and strict JSON output schema. Use Redis token-bucket. Validate the JSON output against schema; if invalid, reject and fall back to computed `event_points` (but record the invalid LLM output in `llm_calls` with parsing error).
-7. **Compute event weight & points**: `event_weight = source_trust * (1 + log(1 + num_related_docs)) * exp(-age_seconds/TAU_SECONDS)`. `event_points = clamp(event_weight * quick_score * 100, -DELTA_CAP, DELTA_CAP)`. Round to 2 decimals.
-8. **Publish signed event**: Sign canonical JSON using `HMAC_SHA256(REALITY_API_SECRET, canonical_payload)` and POST `/api/v1/reality/ingest` on backend.
-
-**LLM prompt & schema**
-
-* Provide LLM with truncated texts (max tokens), sources list, quick_score, and ask for `{summary, impact_suggestion (-100..100 numeric), confidence (0..1), rationale}` in JSON only. Validate strictly.
-
-**Caching & batching**
-
-* Batch embedding calls for efficiency. Cache identical texts to avoid repeated embedding. Keep vector TTL to `VECTOR_WINDOW_SECONDS` and evict older vectors regularly.
-
-**Error & fallback**
-
-* If embedding or LLM fails, the event can still be published with deterministic `event_points` but mark `llm_mode: "failed"` and log error. Do not silently drop events unless duplication or robots disallow.
-
----
-
-# 7. Orderbook & Market Price computation
-
-**Orderbook design principles:** deterministic, auditable, persisted, and recoverable.
-
-**Engine**
-
-* Price-time priority, FIFO within price level, allow partial fills.
-* Orders stored in memory for speed and appended to Postgres for durability. On startup, rebuild from `orders` table.
-
-**MarketPrice mapping & normalization**
-
-* For MVP, use 0..100 domain for prices. Orders must use this scale. If real currency mapping is required later, store `min_price`/`max_price` per stock and apply normalization formula: `norm = clamp((price - min)/(max - min) * 100, 0, 100)`.
-
-**Pressure calculation**
-
-* Compute buy/sell volumes over recent window (1m, 1h) and return `net_pressure`. API returns normalized `market_price` and `buy_volume`, `sell_volume`, `net_pressure`.
-
-**APIs**
-
-* `POST /api/v1/orders` (idempotent with `client_order_id`) — place order.
-* `POST /api/v1/cancel` — cancel order.
-* `GET /api/v1/market/{symbol}/snapshot` — top N bids/asks.
-* `GET /api/v1/market/{symbol}/pressure` — market metrics for blending.
-
-**Persistence**
-
-* `orders` & `trade_history` tables, index by `symbol` and `created_at`. Record every trade for audit.
-
----
-
-# 8. Backend: ingestion, anti-manipulation & blender
-
-**Ingest workflow**
-
-1. Validate HMAC signature and schema.
-2. Check `event_id` uniqueness (idempotency). If duplicate, return 200 with idempotent ack.
-3. Recompute `event_weight` defensively (to prevent mismatch) and validate `impact_points` in range.
-4. Anti-manipulation checks:
-
-   * If `abs(delta) > SUSPICIOUS_DELTA` or single-source cap violated, insert an `llm_audit` record (approved=false) and broadcast `audit_event` with `pending_review:true`. Do not apply the final score change yet.
-   * Else continue.
-5. If allowed, call `orderbook /pressure` to get `MarketPrice` and compute `FinalPrice = market_weight * MarketPrice + reality_weight * NewRealityScore`.
-6. Persist `score_changes` and update `scores` atomically. Broadcast `reality_update` and `final_update`.
-
-**Anti-manipulation specifics**
-
-* Track per-source daily contributions and cap single-source daily influence at `DELTA_CAP` (default 20 points) or a computed cap (configurable). Use rolling 24h counters in DB or Redis.
-* Use z-score or variance checks to flag spikes (z-score > 5) as suspicious as secondary detection.
-
-**Confidence metric**
-
-* Compute `confidence = min(1.0, log(1 + num_independent_sources) * avg_source_trust)` and store with `scores`.
-
----
-
-# 9. Frontend design style & theme
-
-**Design principles**
-
-* Clean, modern, iOS-inspired minimal aesthetic.
-* Focus on clarity: show RealityScore, MarketPrice, FinalPrice side-by-side with numeric badges and small delta indicators.
-* Animations: subtle, physics-based easing for numeric transitions — do not mislead with abrupt jumps.
-* Color palette: rely on your NeuralFit preference (blue & purple) or pick a neutral financial palette (muted blues + accent purple). Use color only for emphasis and status (green for positive, red for negative), but ensure accessibility (contrast).
-
-**Components**
-
-* `Header` with search and user menu.
-* `StockCard` shows symbol, FinalPrice, RealityScore, MarketPrice, confidence badge, market/reality weights.
-* `Chart` (Chart.js) plotting FinalPrice with overlays for Reality and Market. Use sparse gridlines and tooltips showing exact values and event markers.
-* `OrderbookPanel` showing top N levels and an order entry form (buy/sell toggles, limit/market radio).
-* `EventsPanel` with LLM-generated summary, source links, impact score, and admin CTA for pending items.
-* `AdminPanel` restricted to API-key holders: create stocks, approve audits, view llm_calls.
-
-**UX flows**
-
-* Clicking an event expands details and shows sources (open in new tab).
-* Pending events are highlighted and pinned to top for admins.
-* Provide clear CTAs for trade execution and withdrawal.
-
-**Performance considerations**
-
-* Use websocket for real-time updates and fetch historical chart data via REST paginated endpoints.
-* Keep frontend bundle small; lazy-load heavy components (admin, charts with large datasets).
-
----
-
-# 10. LLM analysis & governance
-
-**LLM selection & run policy**
-
-* `tinyLLama` is canonical for local LLM during MVP. All LLM inference runs in `reality-engine` worker.
-* Use a strict JSON schema for output. Reject non-JSON outputs.
-* Validate numeric `impact_suggestion` within [-100,100] and map to `event_points` scale.
-* Rate limit via Redis token-bucket (`LLM_CALLS_PER_HOUR`). If bucket exhausted, skip LLM but still compute deterministic `event_points` and publish with `llm_mode: "skipped"`.
-
-**Prompt design**
-
-* Use fixed prompt templates with clear instructions and truncation strategy. Provide context: truncated texts, quick_score, sources, known symbol list.
-* Ask LLM to return only JSON with the specified schema and nothing else.
-
-**Persistence & audit**
-
-* Persist LLM inputs/outputs in `llm_calls` with `input_hash` and `output_json`. Truncate inputs to avoid storing PII or large raw text.
-* Add `llm_audit` rows for any event that triggers manual review.
-
-**Safety**
-
-* Do not allow LLM to directly write DB. LLM outputs are suggestions that must be validated and applied by deterministic code.
-
----
-
-# 11. Scraper rules & ethics
-
-* **Respect robots.txt** and the site’s `crawl-delay`. If `robots.txt` prohibits scraping, do not proceed.
-* **Use RSS when available.** RSS first; if not, use `newspaper3k` or domain-specific Scrapy spiders.
-* **Playwright only as fallback** for JS heavy pages. Limit Playwright runs to reduce cost/complexity.
-* **User agent & From:** Use `EverythingMarketBot/0.1 (+mailto:ops@yourdomain.com)` and include `From` header when allowed.
-* **Rate limit per domain:** default 1 request / 30s; adjustable in `sources.yaml`.
-* **Caching:** use `ETag` and `If-Modified-Since` to avoid re-downloading unchanged content.
-* **Source trust:** annotate each source in `sources.yaml` with `trust` (0..1) and `crawl_delay`.
-
----
-
-# 12. CI, testing & QA
-
-**Unit tests**: embedder, vector index eviction, quick_scorer, llm_runner parser, orderbook matching, backend blender, anti-manip rules.
-
-**Integration tests**: docker-compose scenario to simulate the whole pipeline (mock external sources). Use deterministic seeds for any randomness.
-
-**CI pipelines**: run tests on PRs. `deploy.yml` builds Docker images on `main` but does not auto-deploy. Include a `test:full` job to run integration tests when needed.
-
-**PR policy**: One feature/bug per PR. Include tests and update `docs/plan.md` for any behavior changes in scoring or LLM prompts.
-
----
-
-# 13. Deployment & operations (Railway)
-
-**Services to create:** `reality-engine`, `orderbook`, `backend`, `frontend`.
-
-**Environment**
-
-* Use Railway plugin for Postgres. Add `DATABASE_URL` to all services that need DB writes.
-* Add `REDIS_URL` for services that need rate-limiting or locks.
-* Set `REALITY_API_SECRET` and `ADMIN_API_KEY` in Railway secrets.
-
-**Scaling**
-
-* Keep `reality-engine` single-worker for LLM runs in MVP. If LLM load grows, move LLM to a dedicated worker and queue jobs.
-* `orderbook` scale vertically for single-region low-latency; consider sharding by symbol at scale.
-
-**Backups & recovery**
-
-* Daily DB backups and retention policy. Test backup restores quarterly.
-
----
-
-# 14. Monitoring, logging & alerts
-
-**Logging**: structured JSON logs with `service`, `correlation_id`, `symbol`, `event_id`. Do not log secrets or raw HTML.
-
-**Metrics**: LLM calls/hr, events/hr, ingestion errors, FAISS memory usage, orderbook latency, DB errors.
-
-**Alerts**: LLM calls exceeding limit, repeated SUSPICIOUS_DELTA events, high 403/429 rates on scrapers, Redis down.
-
-**Dashboards**: simple dashboards in Grafana or Railway logs for these metrics.
-
----
-
-# 15. Legal, privacy & retention
-
-* Persist only summaries and small audit logs by default. Do not persist raw scraped text without approval.
-* Document per-source legal notes in `docs/legal.md` and add `sources.yaml` flags for paywalled or restricted sources.
-* Implement deletion and retention policies for `llm_calls` and `events` older than configured window (e.g., 1 year).
-
----
-
-# 16. Anti-manipulation & admin workflow
-
-* Any event causing `|delta| > SUSPICIOUS_DELTA` must create `llm_audit` and set `processed=false` until `approved=true`.
-* Admin UIs: list pending audits, show LLM summary + sources, allow approve/reject with `approved_by` audit trails.
-* Broadcast `audit_event` to frontend clients indicating `pending_review:true` so UI can mark event.
-
----
-
-# 17. Developer & agent rules for Antigravity (non-negotiable)
-
-1. **Never** generate premade stocks, indexes, or other market content. Stocks/indexes must be created only by authenticated human admin actions via admin APIs/UI. If an Antigravity agent attempts to create seeded assets, abort and report.
-2. **One change per PR**: Agents must implement a single prompt/feature and open a PR to `dev`; include tests and docs updates.
-3. **Run tests locally**: Agents must run unit tests and basic integration tests before opening PRs.
-4. **Do not store secrets**: Agents must put secrets in env-only, not in code or commit history.
-5. **Document changes**: Every PR touching scoring, LLM prompts, thresholds, or sources must update `docs/plan.md` with the exact rationale.
-6. **Human-in-the-loop**: Agents may suggest code or changes but must not approve or merge changes that alter the anti-manipulation or LLM behavior without human sign-off.
-
----
-
-# 18. Runbook & incident playbook (brief)
-
-**Scenario: LLM overuse**
-
-1. Alert triggers when LLM calls/hour > `LLM_CALLS_PER_HOUR`*1.2.
-2. Triage: disable LLM calls by setting `LLM_MODE=disabled` in reality-engine env; fallback uses deterministic quick_score only.
-3. Investigate logs; identify offending source or loop; patch and redeploy.
-
-**Scenario: Suspicious delta flood**
-
-1. If many audits queue: set admin notification escalation, throttle reality-engine ingestion by increasing `POLL_INTERVAL`.
-2. Ensure admin team prioritized review and, if necessary, temporarily block automated score updates.
-
-**Scenario: Orderbook failure**
-
-1. Circuit-break the backend calls to orderbook and fall into read-only mode (no final price updates). Notify ops team.
-
----
-
-# 19. Deliverables & checkpoints
-
-1. Repo + CI + constants (+ docs) — checkpoint 1
-2. Reality-engine ingest + embed + FAISS + llm_runner (local) — checkpoint 2
-3. Orderbook core + persistence — checkpoint 3
-4. Backend ingest + anti-manip + blender + WS — checkpoint 4
-5. Frontend basic dashboard & order placement — checkpoint 5
-6. Integration tests & demo script — checkpoint 6
-7. Deploy to Railway (4 services) and end-to-end demo — checkpoint 7
-
-Each checkpoint must have PR(s) with tests green and `docs/plan.md` updated.
-
----
-
-# 20. Final warnings & commitments
-
-* This document is the canonical guide for building the Everything Market. Follow it strictly for thresholds, auditing, and anti-manipulation behaviors.
-* Antigravity agents must obey the rule: **NO pre-seeded assets**. Human admin only.
-* If any ambiguity arises during implementation, prefer conservative (safer) behavior: prevent automatic score application and require manual review.
-
----
-
-*End of master plan.*
-
----
-
-# Appendices
-
-## Appendix A — Canonical JSON Schemas
-
-### A.1 Reality → Backend (`/api/v1/reality/ingest`) (Pydantic-like)
+All realtime messages must contain these fields:
 
 ```json
 {
-  "event_id": "string (uuid)",
-  "timestamp": "string (ISO8601 UTC)",
-  "stocks": ["SYM1","SYM2"],
-  "quick_score": -0.45,
-  "impact_points": -12.34,
-  "summary": "Short LLM or computed summary (<=2000 chars)",
-  "sources": [{"id":"src-id","url":"https://...","trust":0.85}],
-  "num_independent_sources": 2,
-  "llm_mode": "tinyLLama|skipped|failed",
-  "meta": {"title":"...","author":"..."}
+  "channel":"string",
+  "sequence_number":123,
+  "event_id":"uuid",
+  "ts":"2025-11-24T08:00:00Z",
+  "source_of_truth":"string", 
+  "producer":"string",
+  "payload":{"type":"object"}
 }
 ```
 
-Validation rules:
+* `sequence_number` is monotonic **per channel** (e.g., `market:BTC-USD`).
+* `source_of_truth` = `orderbook_service` | `reality_worker_vX` | `admin_console`.
 
-* `event_id` unique; UUID format.
-* `timestamp` parseable to UTC.
-* `stocks` all exist in `stocks` table.
-* `impact_points` in range [-DELTA_CAP, +DELTA_CAP].
+## 4.2 `/api/v1/ingest` contract
 
-### A.2 tinyLLama output (strict JSON)
+Request body:
 
 ```json
 {
-  "summary": "Short summary (<=1000 chars)",
-  "impact_suggestion": 23.5,
-  "confidence": 0.87,
-  "rationale": "Concise rationale text"
+  "url":"https://...",
+  "idempotency_key":"string",
+  "metadata":{...}
 }
 ```
 
-Validation rules:
+Behavior:
 
-* `impact_suggestion` numeric between -100 and 100.
-* `confidence` between 0 and 1.
-* Reject any text outside of valid JSON.
+* Idempotent by `{job_type="ingest_fetch", idempotency_key}`.
+* Allowed content-size ≤ 10MB.
+* Auth: HMAC worker secret.
 
----
+## 4.3 LLM output schema (required)
 
-## Appendix B — HMAC signing example (canonical)
+LLM responses used in the pipeline must match:
 
-Use HMAC-SHA256 over canonical JSON (sorted keys, UTF-8). Example (Python):
-
-```py
-import hmac, hashlib
-
-def sign_payload(secret: str, payload_bytes: bytes) -> str:
-    mac = hmac.new(secret.encode('utf-8'), payload_bytes, hashlib.sha256)
-    return mac.hexdigest()
+```json
+{
+  "summary":"string",
+  "snapshot_ids":["64hexsha256"],
+  "sources":["canonical_url_or_snapshot_ref"],
+  "confidence":0.0,
+  "schema_version":"v1"
+}
 ```
 
-Canonicalization rules:
+* **No** free-form source strings accepted as canonical proof — prefer `snapshot_id` (sha256 of `<url>|<ts>`).
 
-* Serialize JSON with stable ordering (e.g., `json.dumps(obj, separators=(",", ":"), sort_keys=True)`).
-* Use UTF-8 bytes of the serialized string.
+## 4.4 Jobs / idempotency table (SQL snippet)
 
-Server-side verification:
-
-* Compute HMAC locally and use `hmac.compare_digest` to compare with header value.
+(See full SQL in prior plan; put in `src/infra/idempotency/migrations/001_create_jobs.sql`)
 
 ---
 
-## Appendix C — Example Alembic migration snippet (create events table)
+# 5 — LLM on Hugging Face (how we use it)
 
-```sql
--- alembic revision: create_events_table
-CREATE TABLE events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_id TEXT UNIQUE NOT NULL,
-  symbol TEXT NOT NULL,
-  impact_points DOUBLE PRECISION NOT NULL,
-  quick_score DOUBLE PRECISION,
-  summary TEXT,
-  sources JSONB,
-  llm_mode TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  processed BOOLEAN DEFAULT FALSE
-);
-CREATE INDEX idx_events_symbol_created_at ON events(symbol, created_at DESC);
+1. **Primary option:** Hugging Face Inference API — call hosted model endpoints. Use a robust text-generation model for blending/summary and a lightweight embedding model for vectors (e.g., sentence-transformers family).
+2. **If a free community model is acceptable:** use community-hosted inference endpoints on HF where available; confirm rate/availability. If a free API exists for a chosen model, CI must include fallback logic for quotas.
+3. **Provenance enforcement:** require `snapshot_ids` in all LLM outputs and store raw outputs to `llm_raw/{call_id}.json`. Validate outputs against JSON Schema; reject otherwise.
+4. **Env vars (examples):**
+
+   * `HUGGINGFACE_API_URL` (e.g., `https://api-inference.huggingface.co/models/<model>`)
+   * `HUGGINGFACE_API_KEY`
+   * `LLM_BATCH_SIZE`
+   * `EMBEDDING_MODEL` (model id)
+   * `LLM_MODE=enabled|disabled|degraded`
+
+**Decision checkpoint:** Choose the exact Hugging Face model for embeddings and generation in `docs/decisions.md` after testing on sample inputs.
+
+---
+
+# 6 — Orderbook (clear, hardened)
+
+* **Run as a small dedicated container**: keeps sub-200ms latency for matching.
+* **Durability:** synchronous WAL append on every accepted order. Snapshot to object store every 10s. WAL replay on startup.
+* **API endpoints (orderbook):**
+
+  * `POST /order` (signed) → accept/reject order, write WAL, return `server_order_id`, publish via realtime with channel `market:{symbol}` and `sequence_number` from orderbook.
+  * `POST /cancel`
+  * `GET /snapshot?symbol=` returns orderbook snapshot + `last_sequence`.
+* **Recovery test:** CI must run a kill/replay test ensuring idempotence.
+* **Trade-offs:** accept higher IO for fsync every order in production; allow config `fsync_every_n` for staging.
+
+---
+
+# 7 — Playwright runner (clear)
+
+* Small container pool (e.g., 2–4 instances at start).
+* API: accept fetch jobs, render page, save raw HTML snapshot to object store, produce `snapshot_id=sha256(url|ts)` and return minimal parsed fields.
+* Throttle: per-domain politeness (default 1 req/sec).
+* Use queued jobs with `idempotency_key` and DLQ.
+
+---
+
+# 8 — Anti-manipulation & admin workflow (straight rules)
+
+1. **Create stock/index:** must be created only by admin role + recorded `admin_decision` audit_event (multi-sig for political type optional).
+2. **Event publishing:** `reality-worker` may only propose `candidate_event`s; `final_event` requires either auto-finalization rules (whitelisted low-risk sources) or human approval.
+3. **Rate limits:** source-level rate thresholds; if exceeded → throttle or quarantine source for `MANIP_WINDOW`.
+4. **Admin emergency:** `ops_override` flag is allowed for runbook ops only, must produce immediate audit_event and post-mortem.
+
+---
+
+# 9 — UX & Organization (user perspective)
+
+Goal: **instantly discoverable, low cognitive load.**
+
+Top-level UI areas:
+
+1. **Discover** — browse markets by `type` tiles (Political, Economic, Social, Tech, Finance, Culture, Sports). Each tile shows trending markets and filters.
+2. **Watchlists** — user watchlists (global + typed lists), alerts (price thresholds, news events).
+3. **Market page** — header: title, type badge, human approval status, sources panel (linked snapshots), orderbook panel, timeline (events with `sequence_number`).
+4. **Create Request (users)** — non-admin users can **request** new market; creates a `creation_request` tracked in audit log; admins review.
+5. **Admin Console** — approve creation, manage backfills, moderate sources, human-in-the-loop queue for `political` & `economic`.
+6. **Search** — filter by type, region, risk, recency, source reputation.
+7. **Onboarding & Tooltips** — explain categories and moderation thresholds to users, especially for political markets.
+
+UX specifics:
+
+* Type badges with color coding.
+* Market listing shows `type`, `region`, `risk_level`, `human_approval` tag.
+* For `political` markets, show "This market was human-reviewed on DATE by ADMIN" prominently.
+
+---
+
+# 10 — Observability, SLOs & Alerts (concise)
+
+SLIs & SLOs:
+
+* **Ingest freshness:** 95% of push-enabled feeds processed within 5 min.
+* **Orderbook latency:** 99% orders accepted/rejected < 200ms (dedicated).
+* **Embedding success:** 99% embeddings stored within 60s.
+* **LLM success:** 99% schema-valid outputs under normal token budget.
+
+Alerts:
+
+* > 1% failed ingests for 30m → page Reality lead.
+* Orderbook p50 > 200ms for 30m → page Trading lead.
+* Embedding queue > 5k items → page Reality infra.
+* LLM schema failure rate > 5% → Ops + autoset `LLM_MODE=degraded`.
+
+---
+
+# 11 — Backups & Restore (essentials)
+
+* **Postgres:** hourly incrementals, daily full; restore tested quarterly.
+* **Snapshots:** immediately uploaded to object storage with cross-region replication.
+* **Orderbook WAL & Snapshot:** snapshot every 10s, WAL retained 7 days; automated restore test in staging monthly.
+* **Runbook:** `docs/runbooks/backup_restore.md` with steps to pause ingestion, restore DB, restore orderbook snapshot+WAL, smoke test, unpause.
+
+---
+
+# 12 — Security & Keys (must-have)
+
+* HMAC signing format: `key-id`, `ts`, `nonce`, `signature = HMAC-SHA256(key, method|path|ts|nonce|body)`.
+* Nonce cache per `key-id` for 10 min. Ts tolerance ±120s.
+* Key rotation: dual-accept for 24h, rotate in Vault + record audit_event.
+* RBAC roles: `viewer`, `editor`, `admin`, `super-admin`. Admin actions require 2FA & audit_event.
+
+---
+
+# 13 — File / Repo layout (minimal)
+
+```
+/docs/specs/realtime.md
+/docs/specs/ingest_api.md
+/docs/specs/llm_schemas.md
+/docs/decisions.md
+/docs/runbooks/orderbook_recovery.md
+/src/infra/idempotency/migrations/001_create_jobs.sql
+/src/orderbook/ (service + wal + tests)
+/src/playwright-runner/ (service + dockerfile)
+/src/backend/ (vercel functions)
+/src/frontend/ (nextjs app with typed components)
+/ops/oncall_matrix.md
+/.github/workflows/ci-concurrency-tests.yml
 ```
 
 ---
 
-## Appendix D — Glossary
+# 14 — Env vars (concrete list)
 
-* **RealityScore** — objective score (0..100) computed by Reality Engine and Reality Engine adaptations.
-* **MarketPrice** — price derived from orderbook supply/demand (normalized 0..100).
-* **FinalPrice** — blended price shown to users: `market_weight*MarketPrice + reality_weight*RealityScore`.
-* **Event** — an occurrence extracted from news that can impact a stock's RealityScore.
-* **LLM call** — a single invocation of tinyLLama to analyze grouped documents.
-* **Audit** — an `llm_audit` record representing a pending review for human approval.
+```
+NEON_DATABASE_URL
+PGBOUNCER_URL
+UPSTASH_REST_URL
+VECTOR_DB_URL
+OBJECT_STORE_URL
+OBJECT_STORE_KEY
+REALTIME_PROVIDER_KEY
+HUGGINGFACE_API_URL
+HUGGINGFACE_API_KEY
+LLM_MODE
+EMBEDDING_MODEL
+LLM_BATCH_SIZE
+ORDERBOOK_WAL_S3_BUCKET
+PLAYWRIGHT_RUNNER_URL
+```
+
+---
+
+# 15 — Minimal API list (essential endpoints)
+
+* `POST /api/v1/ingest` — (HMAC) create ingest job (idempotent).
+* `POST /api/v1/order` — (user JWT) create order (forwards to orderbook).
+* `POST /api/v1/admin/action` — (admin JWT) create admin decision (audit_event).
+* `GET /api/v1/market/{symbol}/snapshot?since=` — snapshot + last_sequence.
+* `POST /api/v1/reality/ingest_callback` — (HMAC) for runner to post snapshot_id & parsed meta.
+* `GET /api/v1/search?type=political&region=...` — filtered search.
 
 ---
 
-## Appendix E — Change log & versioning
+# 16 — 30-/90-day Roadmap (actionable)
 
-Add a `CHANGELOG.md` in repo root. Use semantic versioning for the system spec (e.g., `spec v1.0.0`). Every PR that changes thresholds, LLM prompts, or anti-manip rules must update `CHANGELOG.md` with: date, author, files changed, and rationale.
+**Week 0 (setup)**
+
+1. Create `docs/specs/*` (realtime, ingest, llm).
+2. Implement `jobs` table + idempotency logic.
+3. Implement HMAC util + nonce cache.
+4. Provision Neon, Upstash, object storage, realtime provider.
+
+**Week 1 (core infra)**
+5. Build minimal `orderbook-service` with WAL+snapshot + integration test for restart.
+6. Deploy Playwright runner (2 instances) and connect `reality-worker` to it.
+
+**Week 2 (LLM + embeddings)**
+7. Wire Hugging Face Inference calls with schema validation.
+8. Implement embedding batching and vector DB integration.
+
+**Week 3 (frontend & UX)**
+9. Create discover UI by `type` + market page with sequence_number handling.
+10. Implement admin console for approvals & human-in-loop queue.
+
+**Week 4–12 (stabilize & scale)**
+11. Add observability dashboards and alerting rules.
+12. Perform backup restore test and orderbook warm-restart test.
+13. QA: chaos tests (realtime outage, vector DB failure, LLM schema failure).
+14. Public beta with limited markets & explicit human approvals.
 
 ---
 
-## Appendix F — Quick developer checklist (copy into PRs)
+# 17 — Decision checkpoints (what to pick & when)
 
-* [ ] Did you run unit tests for modules you changed?
-* [ ] Did you run `pytest` and ensure no failures?
-* [ ] Did you update `docs/plan.md` if thresholds, prompts, or workflows changed?
-* [ ] Did you avoid committing secrets or pre-seeding assets?
-* [ ] Did you include migration scripts for DB changes?
+1. **Hugging Face model choices** — pick embedding & generation models early (Week 1) after sample runs.
+2. **Orderbook strategy** — dedicated container chosen (we already did). Decide sizing & fsync policy in Week 1.
+3. **Vector DB provider** — choose managed (Pinecone/Supabase) vs FAISS in Week 2.
+4. **Realtime provider** — choose provider with sequence guarantees; implement server-side `sequence_number` regardless.
+
+Record each decision in `docs/decisions.md` with owner & review date.
 
 ---
+
+# 18 — Quick checklist for PRs / CI gates
+
+* Has `idempotency` tests for any new ingest path.
+* HMAC used for inter-service calls; tests for replay protection.
+* LLM outputs validated against JSON Schema; test included.
+* Orderbook has WAL & restart test for changes.
+* No production secrets in preview envs. CI fails if present.
+
+---
+
+# 19 — Immediate next actions I will produce for you (pick one; I’ll generate it now)
+
+A. Full `docs/specs/realtime.md` with client pseudocode & examples.
+B. `orderbook_recovery.md` runbook with exact restore commands and CI test harness.
+C. Playwright runner `Dockerfile` + minimal job server code.
+D. Hugging Face model selection checklist & sample prompt templates + JSON schemas adapted for HF.
+
+Tell me which to generate and I’ll produce it immediately (inline).

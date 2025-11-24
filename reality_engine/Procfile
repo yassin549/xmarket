@@ -1,1 +1,0 @@
-worker: python run.py --backend-url $BACKEND_URL --verbose

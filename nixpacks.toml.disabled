@@ -1,7 +1,0 @@
-# nixpacks.toml is DISABLED - Railway should use Dockerfile instead
-# If Railway is still using this file, check:
-# 1. Service Settings > Builder is set to "Dockerfile"
-# 2. Dockerfile Path is set correctly
-# 3. Delete this file and redeploy if Railway keeps auto-detecting
-
-# This file should NOT be used - we're using Dockerfile.backend instead
