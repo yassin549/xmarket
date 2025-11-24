@@ -17,6 +17,7 @@ Use this as `docs/antigravity-checklist.md` and enforce via CI and `agent-policy
      /src/backend/
      /src/frontend/
      /src/orderbook/
+     /src/reality/
      /src/infra/
      /src/playwright-runner/
      /src/infra/idempotency/migrations/
@@ -159,7 +160,7 @@ Use this as `docs/antigravity-checklist.md` and enforce via CI and `agent-policy
 
     * Candidate events created in `candidate_events` table. For `political` or `economic` types, create human-review task.
     * Admin reviews via Admin Console (below) and calls `POST /api/v1/admin/action` to create `admin_decision`.
-    * Finalizer service picks approved `candidate_event` and writes `final_event` with `audit_event`.
+    * Finalizer logic (within `src/backend/workers/finalizer.ts`) picks approved `candidate_event` and writes `final_event` with `audit_event`.
     * Gate: Human approval required.
 
 ---
