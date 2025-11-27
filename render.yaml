@@ -33,7 +33,7 @@ services:
     runtime: docker
     plan: starter
     region: oregon
-    dockerfilePath: ./src/orderbook/Dockerfile
+    dockerfilePath: ./Dockerfile
     dockerContext: ./src/orderbook
     envVars:
       - key: NODE_ENV

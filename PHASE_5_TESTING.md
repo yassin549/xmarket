@@ -204,16 +204,17 @@ test().catch(console.error);
 
 ---
 
-## Test 7: Check Raw LLM Outputs
+## Troubleshooting
 
+**Issue**: "HUGGINGFACE_API_KEY not configured"  
+**Fix**: Add to `src/.env`:
 ```bash
-ls llm_raw/
-cat llm_raw/<first_file>.json
+# Add to .env.local (if testing locally)
+HUGGINGFACE_API_KEY=hf_your_huggingface_api_key_here
 ```
 
-**Expected**: 
-- Directory contains JSON files with UUIDs
-- Each file has: `prompt`, `raw_output`, `snapshot_ids`, `timestamp`, `model`
+**Issue**: "PINECONE_API_KEY not configured"  
+**Fix**: Add to `src/.env`:
 
 PINECONE_INDEX_NAME=xmarket
 PINECONE_INDEX_HOST=https://xmarket-51f7vkp...
