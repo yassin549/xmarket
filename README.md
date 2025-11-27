@@ -10,11 +10,14 @@
 4. **Provenance** - All external data tracked via content-addressed snapshots
 
 ## Architecture
-- **Frontend**: Next.js (Vercel)
-- **Backend**: Serverless functions (Vercel) + dedicated orderbook service
-- **Reality Engine**: Data ingestion, LLM processing, event candidate generation
-- **Orderbook**: Low-latency matching engine with WAL and snapshots
+- **Frontend**: Next.js (Render Web Service)
+- **Orderbook**: Express + matching engine with WAL (Render Docker Service with persistent disk)
+- **Backend**: Serverless API functions (Render Web Service)
+- **Reality Engine**: Data ingestion and LLM processing (Render Background Worker)
 - **Playwright Runner**: Deterministic web scraping service
+- **Database**: PostgreSQL (Render Managed Database)
+
+All services deployed on Render with automatic HTTPS, service discovery, and persistent storage for orderbook WAL.
 
 ## Repository Structure
 ```
@@ -22,14 +25,15 @@
   /specs/           Technical specs (API contracts, schemas)
   /runbooks/        Operational procedures
 /src/
-  /backend/         Serverless API functions
+  /backend/         Backend API and realtime services
   /frontend/        Next.js web application
-  /orderbook/       Dedicated matching engine service
+  /orderbook/       Dedicated matching engine service (Docker)
   /reality/         Reality engine workers
   /infra/           Shared infrastructure code
   /playwright-runner/ Web scraping service
 /ops/               Operational scripts and configs
 /.github/workflows/ CI/CD pipelines
+render.yaml         Render deployment blueprint
 ```
 
 ## Getting Started

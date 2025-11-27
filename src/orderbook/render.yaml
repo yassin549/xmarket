@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: xmarket-orderbook
+    runtime: node
+    repo: https://github.com/yourusername/xmarket  # Update with your repo
+    rootDir: src/orderbook
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ORDERBOOK_PORT
+        value: 3001
+      - key: ORDERBOOK_WAL_PATH
+        value: /var/data/wal/orderbook.wal
+      - key: FSYNC_EVERY_N
+        value: 1
+      - key: SNAPSHOT_INTERVAL_MS
+        value: 10000
+      - key: NEON_DATABASE_URL
+        sync: false  # Add from Render dashboard
+    disk:
+      name: orderbook-wal
+      mountPath: /var/data
+      sizeGB: 10

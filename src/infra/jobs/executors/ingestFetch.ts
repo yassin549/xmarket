@@ -1,47 +1,92 @@
 /**
- * Example Job Executor - Ingest Fetch
+ * Ingest Fetch Executor (Updated)
  * 
- * Fetches content from a URL and creates a snapshot.
- * This is a placeholder implementation for demonstration.
+ * Fetches content from a URL using the Playwright runner service
+ * and creates a snapshot with deterministic ID.
  */
 
-import crypto from 'crypto';
 import type { JobExecutor } from './index';
 
 export class IngestFetchExecutor implements JobExecutor {
+    private playwrightRunnerUrl: string;
+
+    constructor() {
+        this.playwrightRunnerUrl = process.env.PLAYWRIGHT_RUNNER_URL || 'http://localhost:3001';
+    }
+
     async execute(payload: any): Promise<any> {
-        const { url } = payload;
+        const { url, metadata = {}, max_size = 10 * 1024 * 1024 } = payload;
 
         if (!url) {
             throw new Error('URL is required in payload');
         }
 
-        // Fetch content
-        console.log(`Fetching URL: ${url}`);
-        const response = await fetch(url);
+        console.log(`Calling Playwright runner for: ${url}`);
+
+        // Call Playwright runner service
+        const response = await fetch(`${this.playwrightRunnerUrl}/fetch`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                url,
+                idempotency_key: payload.idempotency_key || Math.random().toString(36),
+            }),
+        });
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const error = await response.json().catch(() => ({ error: 'Unknown error' })) as { error?: string };
+            throw new Error(`Playwright runner failed: ${error.error || response.statusText}`);
         }
 
-        const html = await response.text();
-        const timestamp = new Date().toISOString();
+        const result = await response.json() as {
+            snapshot_id: string;
+            metadata: {
+                title: string;
+                url: string;
+                final_url: string;
+                status_code: number;
+                fetched_at: string;
+            };
+        };
 
-        // Generate snapshot_id: sha256(url + "|" + timestamp)
-        const snapshot_id = crypto
-            .createHash('sha256')
-            .update(`${url}|${timestamp}`)
-            .digest('hex');
+        // CHAINING: Create a 'process_snapshot' job to analyze this new snapshot
+        if (result.snapshot_id) {
+            try {
+                // We use the same db pool from the module context if available.
+                // Since we are in an executor, we can import the db pool.
+                const db = require('../../db/pool').default;
 
-        // In production, would upload to object storage here
-        // await uploadToObjectStorage(snapshot_id, html);
+                await db.query(
+                    `INSERT INTO jobs (type, payload, idempotency_key)
+           VALUES ($1, $2, $3)`,
+                    [
+                        'process_snapshot',
+                        JSON.stringify({
+                            snapshot_id: result.snapshot_id,
+                            url: result.metadata.final_url || url,
+                            title: result.metadata.title,
+                            ingest_id: payload.idempotency_key // Track lineage
+                        }),
+                        `process-${result.snapshot_id}` // Idempotent per snapshot
+                    ]
+                );
+                console.log(`Chained process_snapshot job for ${result.snapshot_id}`);
+            } catch (chainError) {
+                console.error('Failed to chain process_snapshot job:', chainError);
+            }
+        }
 
+        // Result contains: { snapshot_id, metadata: { title, url, final_url, status_code, fetched_at } }
         return {
-            snapshot_id,
+            snapshot_id: result.snapshot_id,
             url,
-            timestamp,
-            size_bytes: html.length,
-            content_type: response.headers.get('content-type'),
+            final_url: result.metadata.final_url,
+            title: result.metadata.title,
+            status_code: result.metadata.status_code,
+            fetched_at: result.metadata.fetched_at,
+            metadata: result.metadata,
         };
     }
 }

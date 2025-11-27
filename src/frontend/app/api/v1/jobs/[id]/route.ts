@@ -34,10 +34,10 @@ interface JobResponse {
  */
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const jobId = params.id;
+        const { id: jobId } = await params;
 
         const result = await query<JobResponse>(
             `SELECT 
@@ -93,10 +93,10 @@ export async function GET(
  */
 export async function PATCH(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
-        const jobId = params.id;
+        const { id: jobId } = await params;
         const body = await request.json();
         const { status, result, error_message } = body;
 
@@ -113,12 +113,12 @@ export async function PATCH(
 
         // Build update query dynamically
         const updates: string[] = ['updated_at = NOW()'];
-        const params: any[] = [];
+        const queryParams: any[] = [];
         let paramIndex = 1;
 
         if (status !== undefined) {
             updates.push(`status = $${paramIndex++}`);
-            params.push(status);
+            queryParams.push(status);
 
             // Set completed_at if status is completed
             if (status === 'completed') {
@@ -128,12 +128,12 @@ export async function PATCH(
 
         if (result !== undefined) {
             updates.push(`result = $${paramIndex++}`);
-            params.push(JSON.stringify(result));
+            queryParams.push(JSON.stringify(result));
         }
 
         if (error_message !== undefined) {
             updates.push(`error_message = $${paramIndex++}`);
-            params.push(error_message);
+            queryParams.push(error_message);
         }
 
         if (updates.length === 1) {
@@ -144,7 +144,7 @@ export async function PATCH(
         }
 
         // Add job_id as last parameter
-        params.push(jobId);
+        queryParams.push(jobId);
 
         const updateResult = await query<JobResponse>(
             `UPDATE jobs
@@ -164,7 +164,7 @@ export async function PATCH(
          completed_at,
          next_attempt_at,
          error_message`,
-            params
+            queryParams
         );
 
         if (updateResult.rows.length === 0) {
