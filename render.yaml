@@ -34,7 +34,7 @@ services:
     plan: starter
     region: oregon
     dockerfilePath: src/orderbook/Dockerfile
-    dockerContext: src/orderbook
+    dockerContext: .
     envVars:
       - key: NODE_ENV
         value: production
