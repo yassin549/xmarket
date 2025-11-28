@@ -8,7 +8,7 @@
  * {
  *   "crons": [{
  *     "path": "/api/cron/update-trading-values",
- *     "schedule": "*/5 * * * * "
+ *     "schedule": "* / 5 * * * *"
     *   }]
  * }
  */

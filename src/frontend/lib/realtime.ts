@@ -24,7 +24,7 @@ interface RealtimeMessage {
 class RealtimeClient {
     private ably: Ably.Realtime;
     private channels: Map<string, number> = new Map(); // channel -> last_seq
-    private subscribers: Map<string, Set<(message: any) => void>> = new Map();
+    private subscribers: Map<string, Set<(payload: any, metadata: { sequence: number; ts: number }) => void>> = new Map();
 
     constructor(apiKey: string) {
         this.ably = new Ably.Realtime(apiKey);
@@ -125,7 +125,7 @@ class RealtimeClient {
      * Get current sequence for a channel
      */
     getCurrentSequence(channel: string): number {
-        return this.channels.get(channelName) || 0;
+        return this.channels.get(channel) || 0;
     }
 
     /**

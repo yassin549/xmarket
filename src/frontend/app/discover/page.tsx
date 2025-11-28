@@ -6,14 +6,14 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import TypeTile from '@/components/discover/TypeTile';
 import TypeBadge from '@/components/ui/TypeBadge';
 import { Market, MarketType, MARKET_TYPE_INFO } from '@/types/market';
 import Link from 'next/link';
 
-export default function DiscoverPage() {
+function DiscoverContent() {
     const searchParams = useSearchParams();
     const selectedType = searchParams?.get('type') as MarketType | null;
     const [markets, setMarkets] = useState<Market[]>([]);
@@ -168,5 +168,13 @@ export default function DiscoverPage() {
                 )}
             </div>
         </div>
+    );
+}
+
+export default function DiscoverPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-gray-50 flex items-center justify-center">Loading...</div>}>
+            <DiscoverContent />
+        </Suspense>
     );
 }

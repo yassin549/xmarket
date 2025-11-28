@@ -1,0 +1,22 @@
+{
+    "name": "xmarket-root",
+    "private": true,
+    "workspaces": [
+        "src/frontend",
+        "src/infra",
+        "src/orderbook"
+    ],
+    "scripts": {
+        "build": "cd src/frontend && npm run build",
+        "dev": "cd src/frontend && npm run dev",
+        "lint": "cd src/frontend && npm run lint"
+    },
+    "dependencies": {
+        "next": "16.0.4",
+        "react": "19.2.0",
+        "react-dom": "19.2.0"
+    },
+    "engines": {
+        "node": "20.x"
+    }
+}

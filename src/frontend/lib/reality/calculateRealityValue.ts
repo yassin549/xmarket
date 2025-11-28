@@ -10,6 +10,18 @@ import { scrapeMultipleSources, type ScrapedContent } from './scraper';
 import { analyzeMultipleSources, type ImpactAnalysis } from './llmAnalyzer';
 
 interface Variable {
+    variable_id: string;
+    symbol: string;
+    name: string;
+    description: string;
+    reality_sources: string[];
+    impact_keywords: string[];
+    llm_context?: string;
+    reality_value: number | null;
+    initial_value: number;
+}
+
+interface RealityUpdateResult {
     variableId: string;
     symbol: string;
     oldValue: number;
