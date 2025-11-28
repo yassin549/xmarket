@@ -35,8 +35,8 @@ CREATE TABLE IF NOT EXISTS users (
   )
 );
 
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 COMMENT ON TABLE users IS 'User accounts and authentication';
 COMMENT ON COLUMN users.role IS 'RBAC role: viewer, editor, admin, super-admin';
@@ -82,19 +82,21 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trg_prevent_audit_update ON audit_event;
 CREATE TRIGGER trg_prevent_audit_update
   BEFORE UPDATE ON audit_event
   FOR EACH ROW
   EXECUTE FUNCTION prevent_audit_modifications();
 
+DROP TRIGGER IF EXISTS trg_prevent_audit_delete ON audit_event;
 CREATE TRIGGER trg_prevent_audit_delete
   BEFORE DELETE ON audit_event
   FOR EACH ROW
   EXECUTE FUNCTION prevent_audit_modifications();
 
-CREATE INDEX idx_audit_created_at ON audit_event(created_at);
-CREATE INDEX idx_audit_actor ON audit_event(actor_id, actor_type);
-CREATE INDEX idx_audit_action ON audit_event(action);
+CREATE INDEX IF NOT EXISTS idx_audit_created_at ON audit_event(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_event(actor_id, actor_type);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_event(action);
 
 COMMENT ON TABLE audit_event IS 'Append-only audit log for all state changes';
 COMMENT ON COLUMN audit_event.actor_type IS 'Actor type: human, agent, or system';
@@ -147,10 +149,10 @@ CREATE TABLE IF NOT EXISTS markets (
   )
 );
 
-CREATE INDEX idx_markets_type ON markets(type);
-CREATE INDEX idx_markets_status ON markets(status);
-CREATE INDEX idx_markets_created_by ON markets(created_by);
-CREATE INDEX idx_markets_symbol ON markets(symbol);
+CREATE INDEX IF NOT EXISTS idx_markets_type ON markets(type);
+CREATE INDEX IF NOT EXISTS idx_markets_status ON markets(status);
+CREATE INDEX IF NOT EXISTS idx_markets_created_by ON markets(created_by);
+CREATE INDEX IF NOT EXISTS idx_markets_symbol ON markets(symbol);
 
 COMMENT ON TABLE markets IS 'Trading markets organized by category';
 COMMENT ON COLUMN markets.type IS 'Market category: political, economic, social, technology, finance, culture, sports';
@@ -179,8 +181,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_snapshots_url ON snapshots(url);
-CREATE INDEX idx_snapshots_fetched_at ON snapshots(fetched_at);
+CREATE INDEX IF NOT EXISTS idx_snapshots_url ON snapshots(url);
+CREATE INDEX IF NOT EXISTS idx_snapshots_fetched_at ON snapshots(fetched_at);
 
 COMMENT ON TABLE snapshots IS 'Metadata for content-addressed external snapshots';
 COMMENT ON COLUMN snapshots.snapshot_id IS 'SHA256(url + "|" + fetched_iso_ts)';
@@ -220,8 +222,8 @@ CREATE TABLE IF NOT EXISTS events (
   )
 );
 
-CREATE INDEX idx_events_market_id ON events(market_id);
-CREATE INDEX idx_events_published_at ON events(published_at);
+CREATE INDEX IF NOT EXISTS idx_events_market_id ON events(market_id);
+CREATE INDEX IF NOT EXISTS idx_events_published_at ON events(published_at);
 
 COMMENT ON TABLE events IS 'Final published events affecting markets';
 COMMENT ON COLUMN events.snapshot_ids IS 'Array of snapshot_id references for provenance';
@@ -240,7 +242,7 @@ CREATE TABLE IF NOT EXISTS channel_counters (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_channel_counters_updated_at ON channel_counters(updated_at);
+CREATE INDEX IF NOT EXISTS idx_channel_counters_updated_at ON channel_counters(updated_at);
 
 COMMENT ON TABLE channel_counters IS 'Realtime sequence tracking per channel';
 COMMENT ON COLUMN channel_counters.last_sequence_number IS 'Monotonically increasing sequence per channel';
@@ -249,16 +251,19 @@ COMMENT ON COLUMN channel_counters.last_sequence_number IS 'Monotonically increa
 -- TRIGGERS FOR updated_at
 -- ============================================================================
 
+DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
 CREATE TRIGGER trg_users_updated_at
   BEFORE UPDATE ON users
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trg_markets_updated_at ON markets;
 CREATE TRIGGER trg_markets_updated_at
   BEFORE UPDATE ON markets
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trg_channel_counters_updated_at ON channel_counters;
 CREATE TRIGGER trg_channel_counters_updated_at
   BEFORE UPDATE ON channel_counters
   FOR EACH ROW

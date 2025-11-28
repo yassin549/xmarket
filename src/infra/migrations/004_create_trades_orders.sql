@@ -32,16 +32,16 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_orders_user_id ON orders(user_id);
-CREATE INDEX idx_orders_symbol ON orders(symbol);
-CREATE INDEX idx_orders_status ON orders(status);
-CREATE INDEX idx_orders_created_at ON orders(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
 
-CREATE INDEX idx_trades_buyer_order ON trades(buyer_order_id);
-CREATE INDEX idx_trades_seller_order ON trades(seller_order_id);
-CREATE INDEX idx_trades_symbol ON trades(symbol);
-CREATE INDEX idx_trades_sequence ON trades(sequence_number DESC);
-CREATE INDEX idx_trades_created_at ON trades(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_buyer_order ON trades(buyer_order_id);
+CREATE INDEX IF NOT EXISTS idx_trades_seller_order ON trades(seller_order_id);
+CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
+CREATE INDEX IF NOT EXISTS idx_trades_sequence ON trades(sequence_number DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at DESC);
 
 -- Comments
 COMMENT ON TABLE orders IS 'All orders submitted to the orderbook';

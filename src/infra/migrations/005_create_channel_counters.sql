@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS channel_counters (
 );
 
 -- Index for monitoring
-CREATE INDEX idx_channel_counters_updated ON channel_counters(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_counters_updated ON channel_counters(updated_at DESC);
 
 -- Comments
 COMMENT ON TABLE channel_counters IS 'Tracks sequence numbers for realtime channels to enable gap detection';

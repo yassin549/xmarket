@@ -1,0 +1,31 @@
+{
+    "framework": "nextjs",
+    "buildCommand": "cd src/frontend && npm run build",
+    "devCommand": "cd src/frontend && npm run dev",
+    "installCommand": "cd src/frontend && npm install",
+    "outputDirectory": "src/frontend/.next",
+    "crons": [
+        {
+            "path": "/api/cron/update-reality",
+            "schedule": "*/15 * * * *"
+        },
+        {
+            "path": "/api/cron/update-trading-values",
+            "schedule": "*/5 * * * *"
+        }
+    ],
+    "env": {
+        "NEON_DATABASE_URL": "@neon_database_url",
+        "HUGGINGFACE_API_KEY": "@huggingface_api_key",
+        "UPSTASH_REST_URL": "@upstash_rest_url",
+        "UPSTASH_REST_TOKEN": "@upstash_rest_token",
+        "PINECONE_API_KEY": "@pinecone_api_key",
+        "PINECONE_INDEX_HOST": "@pinecone_index_host",
+        "BLOB_READ_WRITE_TOKEN": "@blob_read_write_token",
+        "ABLY_API_KEY": "@ably_api_key",
+        "CRON_SECRET": "@cron_secret"
+    },
+    "regions": [
+        "iad1"
+    ]
+}
