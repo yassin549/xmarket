@@ -8,11 +8,11 @@ import { requireAnyAuth } from '@/lib/middleware/requireAuth';
  * Place a new order to the orderbook service.
  * Requires authentication.
  */
-export async function POST(request: NextRequest) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
     // Require authentication
     const authResult = await requireAnyAuth(request);
     if (authResult.error) {
-        return authResult.response;
+        return authResult.response!;
     }
 
     const user_id = authResult.session!.user_id;
