@@ -15,47 +15,66 @@
        COLOR SYSTEM
        Dark theme with blue accents
        ======================================== */
-    
+
     /* Backgrounds */
-    --bg-00: #0a0f1a;        /* Darkest page background */
-    --bg-05: #0f1621;        /* Slightly lighter background */
-    --surface-10: #16202e;   /* Primary card surface */
-    --surface-20: #1c2736;   /* Elevated surface */
-    
+    --bg-00: #0a0f1a;
+    /* Darkest page background */
+    --bg-05: #0f1621;
+    /* Slightly lighter background */
+    --surface-10: #16202e;
+    /* Primary card surface */
+    --surface-20: #1c2736;
+    /* Elevated surface */
+
     /* Primary Blue */
-    --primary-50: #3b82f6;   /* Vivid blue - main accent */
-    --primary-40: #2563eb;   /* Darker blue */
-    --primary-60: #60a5fa;   /* Lighter blue */
-    
+    --primary-50: #3b82f6;
+    /* Vivid blue - main accent */
+    --primary-40: #2563eb;
+    /* Darker blue */
+    --primary-60: #60a5fa;
+    /* Lighter blue */
+
     /* Accent Blue */
-    --accent-30: #38bdf8;    /* Lighter blue for secondary accents */
-    --accent-20: #0ea5e9;    /* Sky blue */
-    
+    --accent-30: #38bdf8;
+    /* Lighter blue for secondary accents */
+    --accent-20: #0ea5e9;
+    /* Sky blue */
+
     /* Text Colors */
-    --text-10: #f8fafc;      /* Primary copy (highest contrast) */
-    --text-20: #e2e8f0;      /* Secondary copy */
-    --muted-20: #94a3b8;     /* Muted copy */
-    --muted-30: #64748b;     /* Very muted */
-    
+    --text-10: #f8fafc;
+    /* Primary copy (highest contrast) */
+    --text-20: #e2e8f0;
+    /* Secondary copy */
+    --muted-20: #94a3b8;
+    /* Muted copy */
+    --muted-30: #64748b;
+    /* Very muted */
+
     /* Semantic Colors */
-    --success: #10b981;      /* Green for positive changes */
-    --danger: #ef4444;       /* Red for negative changes */
-    --warning: #f59e0b;      /* Amber for warnings */
-    
+    --success: #10b981;
+    /* Green for positive changes */
+    --danger: #ef4444;
+    /* Red for negative changes */
+    --warning: #f59e0b;
+    /* Amber for warnings */
+
     /* Glass Effects */
-    --glass-01: rgba(255, 255, 255, 0.05); /* Transparent surface */
-    --glass-02: rgba(255, 255, 255, 0.08); /* More opaque glass */
-    --glass-border: rgba(255, 255, 255, 0.1); /* Glass borders */
-    
+    --glass-01: rgba(255, 255, 255, 0.05);
+    /* Transparent surface */
+    --glass-02: rgba(255, 255, 255, 0.08);
+    /* More opaque glass */
+    --glass-border: rgba(255, 255, 255, 0.1);
+    /* Glass borders */
+
     /* ========================================
        TYPOGRAPHY
        Inter (body), Outfit (headings)
        ======================================== */
-    
+
     --font-display: 'Outfit', sans-serif;
     --font-body: 'Inter', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    
+
     /* Type Scale */
     --text-h1: 48px;
     --text-h2: 36px;
@@ -64,22 +83,22 @@
     --text-body: 16px;
     --text-small: 14px;
     --text-caption: 12px;
-    
+
     /* Line Heights */
     --lh-tight: 1.2;
     --lh-normal: 1.5;
     --lh-relaxed: 1.75;
-    
+
     /* Letter Spacing */
     --ls-tight: -0.02em;
     --ls-normal: 0;
     --ls-wide: 0.02em;
-    
+
     /* ========================================
        SPACING
        4px base unit (1 = 4px)
        ======================================== */
-    
+
     --space-1: 4px;
     --space-2: 8px;
     --space-3: 12px;
@@ -92,33 +111,33 @@
     --space-12: 48px;
     --space-16: 64px;
     --space-20: 80px;
-    
+
     /* ========================================
        RADIUS
        Soft rounded corners
        ======================================== */
-    
+
     --radius-sm: 6px;
     --radius-md: 12px;
     --radius-lg: 16px;
     --radius-xl: 24px;
     --radius-full: 9999px;
-    
+
     /* ========================================
        SHADOWS
        Subtle depth
        ======================================== */
-    
+
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4);
     --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.5);
     --shadow-glow-blue: 0 0 20px rgba(59, 130, 246, 0.3);
-    
+
     /* ========================================
        TRANSITIONS
        ======================================== */
-    
+
     --transition-fast: 150ms ease;
     --transition-normal: 250ms ease;
     --transition-slow: 350ms ease;
@@ -127,7 +146,7 @@
   /* ========================================
      BASE STYLES
      ======================================== */
-  
+
   * {
     @apply border-border;
   }
@@ -144,17 +163,33 @@
   }
 
   /* Headings */
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-display);
     font-weight: 700;
     letter-spacing: var(--ls-tight);
     line-height: var(--lh-tight);
   }
 
-  h1 { font-size: var(--text-h1); }
-  h2 { font-size: var(--text-h2); }
-  h3 { font-size: var(--text-h3); }
-  h4 { font-size: var(--text-h4); }
+  h1 {
+    font-size: var(--text-h1);
+  }
+
+  h2 {
+    font-size: var(--text-h2);
+  }
+
+  h3 {
+    font-size: var(--text-h3);
+  }
+
+  h4 {
+    font-size: var(--text-h4);
+  }
 
   /* Links */
   a {
@@ -162,7 +197,8 @@
   }
 
   /* Code */
-  code, pre {
+  code,
+  pre {
     font-family: var(--font-mono);
   }
 
@@ -176,7 +212,7 @@
   /* ========================================
      GLASSMORPHISM UTILITIES
      ======================================== */
-  
+
   .glass-card {
     @apply bg-[var(--glass-01)] backdrop-blur-lg border border-[var(--glass-border)];
   }
@@ -188,7 +224,7 @@
   /* ========================================
      BUTTON VARIANTS
      ======================================== */
-  
+
   .btn {
     @apply px-4 py-2rounded-lg font-semibold transition-all duration-200;
   }
@@ -208,7 +244,7 @@
   /* ========================================
      INPUT STYLES
      ======================================== */
-  
+
   .input {
     @apply px-4 py-3 bg-[var(--surface-10)] border border-[var(--glass-border)] rounded-lg text-[var(--text-10)] placeholder-[var(--muted-30)];
     @apply focus:outline-none focus:ring-2 focus:ring-[var(--primary-50)] focus:border-transparent;
@@ -218,7 +254,7 @@
   /* ========================================
      CARD STYLES
      ======================================== */
-  
+
   .card {
     @apply bg-[var(--surface-10)] border border-[var(--glass-border)] rounded-xl p-6;
   }
@@ -230,7 +266,7 @@
   /* ========================================
      DATA TABLE STYLES
      ======================================== */
-  
+
   .table {
     @apply w-full text-left;
   }
@@ -250,7 +286,7 @@
   /* ========================================
      SCROLL BARS
      ======================================== */
-  
+
   ::-webkit-scrollbar {
     @apply w-2 h-2;
   }
@@ -268,14 +304,19 @@
   /* ========================================
      ANIMATION UTILITIES
      ======================================== */
-  
+
   .animate-fade-in {
     animation: fadeIn var(--transition-normal) ease-in;
   }
 
   @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+
+    to {
+      opacity: 1;
+    }
   }
 
   .animate-slide-up {
@@ -287,6 +328,7 @@
       opacity: 0;
       transform: translateY(10px);
     }
+
     to {
       opacity: 1;
       transform: translateY(0);
