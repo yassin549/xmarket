@@ -32,7 +32,7 @@ export function generateToken(
     payload: Omit<JWTPayload, 'exp' | 'iat'>,
     expiresIn: string = '7d'
 ): string {
-    return jwt.sign(payload, SECRET, {
+    return jwt.sign(payload, SECRET!, {
         expiresIn,
         algorithm: 'HS256',
     });
@@ -45,7 +45,7 @@ export function generateToken(
  */
 export function verifyToken(token: string): JWTPayload | null {
     try {
-        const decoded = jwt.verify(token, SECRET, {
+        const decoded = jwt.verify(token, SECRET!, {
             algorithms: ['HS256'],
         }) as JWTPayload;
         return decoded;
