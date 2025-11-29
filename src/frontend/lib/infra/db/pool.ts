@@ -19,12 +19,12 @@ import { Pool, PoolConfig, QueryResult, PoolClient, QueryResultRow } from 'pg';
 const getPoolConfig = (): PoolConfig => {
     const env = process.env.NODE_ENV || 'development';
 
-    if (!process.env.DATABASE_URL) {
-        throw new Error('DATABASE_URL environment variable is not set');
+    if (!process.env.NEON_DATABASE_URL) {
+        throw new Error('NEON_DATABASE_URL environment variable is not set');
     }
 
     const baseConfig: PoolConfig = {
-        connectionString: process.env.DATABASE_URL,
+        connectionString: process.env.NEON_DATABASE_URL,
         ssl: env !== 'test' ? { rejectUnauthorized: false } : undefined,
     };
 

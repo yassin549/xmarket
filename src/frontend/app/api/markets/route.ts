@@ -1,7 +1,7 @@
 /**
  * Markets API Route
  * 
- * Handles fetching markets with filtering by type.
+ * Handles fetching markets (variables) with filtering by category.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,7 +12,7 @@ import { Market } from '@/types/market';
  * GET /api/markets
  * 
  * Query parameters:
- * - type: Filter by market type
+ * - type: Filter by category (maps to variable category)
  * - limit: Number of results (default: 50)
  * - offset: Pagination offset (default: 0)
  */
@@ -25,20 +25,20 @@ export async function GET(request: NextRequest) {
 
         let sql = `
       SELECT 
-        market_id,
+        variable_id as market_id,
         symbol,
-        title,
+        name as title,
         description,
-        type,
-        region,
-        risk_level,
-        human_approval,
-        approved_at,
-        approved_by,
+        category as type,
+        'global' as region,
+        'medium' as risk_level,
+        true as human_approval,
+        created_at as approved_at,
+        'system' as approved_by,
         status,
         created_at,
         updated_at
-      FROM markets
+      FROM variables
       WHERE status = 'active'
     `;
 
@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
         let paramIndex = 1;
 
         if (type) {
-            sql += ` AND type = $${paramIndex++}`;
+            sql += ` AND category = $${paramIndex++}`;
             params.push(type);
         }
 
@@ -66,6 +66,7 @@ export async function GET(request: NextRequest) {
             {
                 success: false,
                 error: 'Failed to fetch markets',
+                details: error instanceof Error ? error.message : 'Unknown error'
             },
             { status: 500 }
         );
