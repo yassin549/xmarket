@@ -9,11 +9,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAnyAuth } from '@/lib/middleware/requireAuth';
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
     // Require authentication
     const authResult = await requireAnyAuth(request);
     if (authResult.error) {
-        return authResult.response;
+        return authResult.response!;
     }
 
     const session = authResult.session!;
