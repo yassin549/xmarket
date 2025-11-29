@@ -147,10 +147,6 @@
      BASE STYLES
      ======================================== */
 
-  * {
-    @apply border-border;
-  }
-
   html {
     @apply antialiased;
   }
