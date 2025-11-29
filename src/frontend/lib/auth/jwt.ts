@@ -33,9 +33,9 @@ export function generateToken(
     expiresIn: string = '7d'
 ): string {
     return jwt.sign(payload, SECRET!, {
-        expiresIn,
+        expiresIn: expiresIn,
         algorithm: 'HS256',
-    });
+    } as jwt.SignOptions);
 }
 
 /**
