@@ -1,18 +1,22 @@
-/**
- * Orders API Route
- * 
- * Handles order placement.
- */
-
 import { NextRequest, NextResponse } from 'next/server';
 import { v4 as uuid } from 'uuid';
+import { requireAnyAuth } from '@/lib/middleware/requireAuth';
 
 /**
  * POST /api/orders
  * 
  * Place a new order to the orderbook service.
+ * Requires authentication.
  */
 export async function POST(request: NextRequest) {
+    // Require authentication
+    const authResult = await requireAnyAuth(request);
+    if (authResult.error) {
+        return authResult.response;
+    }
+
+    const user_id = authResult.session!.user_id;
+
     try {
         const body = await request.json();
         const { symbol, side, type, price, quantity, client_order_id } = body;
@@ -24,9 +28,6 @@ export async function POST(request: NextRequest) {
                 { status: 400 }
             );
         }
-
-        // TODO: Get user_id from session
-        const user_id = 'user_123'; // Placeholder
 
         // Forward to orderbook service
         const orderbook_url = process.env.ORDERBOOK_URL || 'http://localhost:3001';
