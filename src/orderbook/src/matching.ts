@@ -262,12 +262,13 @@ export class MatchingEngine {
      */
     restoreState(state: any): void {
         this.books.clear();
-        for (const [symbol, data] of Object.entries(state as any)) {
+        for (const [symbol, data] of Object.entries(state)) {
+            const bookData = data as { bids: Order[], asks: Order[] };
             const book = this.getBook(symbol);
-            for (const order of data.bids) {
+            for (const order of bookData.bids) {
                 book.bids.enqueue({ order, timestamp: order.timestamp || Date.now() });
             }
-            for (const order of data.asks) {
+            for (const order of bookData.asks) {
                 book.asks.enqueue({ order, timestamp: order.timestamp || Date.now() });
             }
         }
