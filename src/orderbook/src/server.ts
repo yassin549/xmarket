@@ -14,7 +14,7 @@ const app = express();
 app.use(express.json());
 
 // Configuration
-const PORT = parseInt(process.env.ORDERBOOK_PORT || '3001');
+const PORT = parseInt(process.env.PORT || process.env.ORDERBOOK_PORT || '3001');
 const WAL_PATH = process.env.ORDERBOOK_WAL_PATH || './data/wal/orderbook.wal';
 const FSYNC_EVERY_N = parseInt(process.env.FSYNC_EVERY_N || '1');
 const SNAPSHOT_INTERVAL_MS = parseInt(process.env.SNAPSHOT_INTERVAL_MS || '10000');
