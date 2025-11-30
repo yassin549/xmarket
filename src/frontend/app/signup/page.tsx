@@ -48,9 +48,9 @@ export default function SignupPage() {
                 return;
             }
 
-            // Use AuthProvider login method (assuming signup returns token, or auto-login)
+            // Use AuthProvider login method with user data from response
             if (data.token) {
-                await login(data.token);
+                await login(data.token, data.user);
                 router.push('/dashboard');
             } else {
                 // If no token returned, redirect to login

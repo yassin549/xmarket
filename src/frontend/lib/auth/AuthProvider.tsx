@@ -19,7 +19,7 @@ interface User {
 interface AuthContextType {
     user: User | null;
     loading: boolean;
-    login: (token: string) => Promise<void>;
+    login: (token: string, userData?: User) => Promise<void>;
     logout: () => void;
     refreshUser: () => Promise<void>;
 }
@@ -55,10 +55,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
-    const login = async (token: string) => {
-        // Token is already set as cookie by the API
-        // Just refresh the user state
-        await refreshUser();
+    const login = async (token: string, userData?: User) => {
+        // If user data is provided (from login/signup response), use it directly
+        if (userData) {
+            setUser(userData);
+            setLoading(false);
+        } else {
+            // Otherwise refresh from server
+            await refreshUser();
+        }
     };
 
     const logout = async () => {

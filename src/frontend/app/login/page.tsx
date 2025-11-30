@@ -43,8 +43,8 @@ export default function LoginPage() {
                 return;
             }
 
-            // Use AuthProvider login method
-            await login(data.token);
+            // Use AuthProvider login method with user data from response
+            await login(data.token, data.user);
 
             // Redirect to dashboard
             router.push('/dashboard');
