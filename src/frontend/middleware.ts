@@ -12,15 +12,38 @@ import { verifyToken } from './lib/auth/jwt';
 
 export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
+    console.log('[Middleware] Request to:', pathname);
 
     // Extract token from header or cookie
     const authHeader = request.headers.get('authorization');
+    const cookieToken = request.cookies.get('auth_token')?.value;
     const token = authHeader?.startsWith('Bearer ')
         ? authHeader.substring(7)
-        : request.cookies.get('auth_token')?.value;
+        : cookieToken;
+
+    console.log('[Middleware] Auth check:', {
+        hasAuthHeader: !!authHeader,
+        hasCookieToken: !!cookieToken,
+        hasToken: !!token,
+        tokenPreview: token ? token.substring(0, 20) + '...' : 'none'
+    });
 
     // Verify token
-    const session = token ? verifyToken(token) : null;
+    let session = null;
+    if (token) {
+        try {
+            session = verifyToken(token);
+            console.log('[Middleware] Session verified:', {
+                user_id: session?.user_id,
+                email: session?.email,
+                role: session?.role
+            });
+        } catch (error) {
+            console.error('[Middleware] Token verification failed:', error);
+        }
+    } else {
+        console.log('[Middleware] No token found');
+    }
 
     // Protect /admin routes (except /admin/login)
     if (pathname.startsWith('/admin')) {
@@ -28,6 +51,7 @@ export function middleware(request: NextRequest) {
             // Allow access to login page
             // If already authenticated, redirect to admin dashboard
             if (session && (session.role === 'admin' || session.role === 'super-admin')) {
+                console.log('[Middleware] Admin already logged in, redirecting to /admin');
                 return NextResponse.redirect(new URL('/admin', request.url));
             }
             return NextResponse.next();
@@ -35,11 +59,13 @@ export function middleware(request: NextRequest) {
 
         // All other /admin routes require authentication
         if (!session) {
+            console.log('[Middleware] No session for /admin, redirecting to /admin/login');
             return NextResponse.redirect(new URL('/admin/login', request.url));
         }
 
         // Check for admin role
         if (session.role !== 'admin' && session.role !== 'super-admin') {
+            console.log('[Middleware] Non-admin trying to access /admin, redirecting to /');
             return NextResponse.redirect(new URL('/', request.url));
         }
     }
@@ -47,15 +73,19 @@ export function middleware(request: NextRequest) {
     // Protect /dashboard routes
     if (pathname.startsWith('/dashboard')) {
         if (!session) {
+            console.log('[Middleware] No session for /dashboard, redirecting to /login');
             return NextResponse.redirect(new URL('/login', request.url));
         }
+        console.log('[Middleware] Session valid for /dashboard, allowing access');
     }
 
     // Redirect authenticated users away from login/signup pages
     if (session && (pathname === '/login' || pathname === '/signup')) {
+        console.log('[Middleware] Authenticated user on login/signup, redirecting to /dashboard');
         return NextResponse.redirect(new URL('/dashboard', request.url));
     }
 
+    console.log('[Middleware] Allowing request to proceed');
     return NextResponse.next();
 }
 
