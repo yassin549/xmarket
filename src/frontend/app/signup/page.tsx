@@ -49,7 +49,7 @@ export default function SignupPage() {
             }
 
             // Use AuthProvider login method with user data from response
-            if (data.token) {
+            if (data.token && data.user) {
                 await login(data.token, data.user);
                 router.push('/dashboard');
             } else {
@@ -57,6 +57,7 @@ export default function SignupPage() {
                 router.push('/login');
             }
         } catch (err) {
+            console.error('Signup error:', err);
             setError('An error occurred. Please try again.');
             setLoading(false);
         }

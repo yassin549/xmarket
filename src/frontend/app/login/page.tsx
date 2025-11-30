@@ -49,6 +49,7 @@ export default function LoginPage() {
             // Redirect to dashboard
             router.push('/dashboard');
         } catch (err) {
+            console.error('Login error:', err);
             setError('An error occurred. Please try again.');
             setLoading(false);
         }
