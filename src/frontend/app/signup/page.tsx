@@ -10,9 +10,14 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Card } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { useAuth } from '@/lib/auth/AuthProvider';
 
 export default function SignupPage() {
     const router = useRouter();
+    const { login } = useAuth();
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [displayName, setDisplayName] = useState('');
@@ -43,11 +48,14 @@ export default function SignupPage() {
                 return;
             }
 
-            // Store token in localStorage
-            localStorage.setItem('auth_token', data.token);
-
-            // Redirect to dashboard
-            router.push('/dashboard');
+            // Use AuthProvider login method (assuming signup returns token, or auto-login)
+            if (data.token) {
+                await login(data.token);
+                router.push('/dashboard');
+            } else {
+                // If no token returned, redirect to login
+                router.push('/login');
+            }
         } catch (err) {
             setError('An error occurred. Please try again.');
             setLoading(false);
@@ -55,113 +63,86 @@ export default function SignupPage() {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 px-4">
-            <div className="w-full max-w-md">
-                {/* Card */}
-                <div className="bg-slate-800/50 backdrop-blur-lg rounded-2xl border border-slate-700/50 p-8 shadow-2xl">
-                    {/* Header */}
+        <div className="min-h-screen flex items-center justify-center bg-[var(--bg-00)] px-4 relative overflow-hidden">
+            {/* Background Effects */}
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full max-w-7xl pointer-events-none">
+                <div className="absolute top-1/4 right-1/4 w-96 h-96 bg-[var(--primary-50)] rounded-full mix-blend-multiply filter blur-[128px] opacity-10 animate-pulse" />
+                <div className="absolute bottom-1/4 left-1/4 w-96 h-96 bg-[var(--accent-50)] rounded-full mix-blend-multiply filter blur-[128px] opacity-10 animate-pulse delay-1000" />
+            </div>
+
+            <div className="w-full max-w-md relative z-10">
+                <Card variant="glass" className="shadow-2xl border-[var(--glass-border)]">
                     <div className="text-center mb-8">
-                        <h1 className="text-3xl font-bold text-white mb-2">
+                        <h1 className="text-3xl font-bold text-white mb-2 font-display">
                             Create Account
                         </h1>
-                        <p className="text-slate-400">
+                        <p className="text-[var(--muted-20)]">
                             Join Everything Market and start trading
                         </p>
                     </div>
 
-                    {/* Form */}
-                    <form onSubmit={handleSubmit}>
-                        {/* Display Name */}
-                        <div className="mb-4">
-                            <label
-                                htmlFor="displayName"
-                                className="block text-sm font-medium text-slate-300 mb-2"
-                            >
-                                Display Name
-                            </label>
-                            <input
-                                id="displayName"
-                                type="text"
-                                value={displayName}
-                                onChange={(e) => setDisplayName(e.target.value)}
-                                className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                                placeholder="Your name"
-                                disabled={loading}
-                            />
-                        </div>
+                    <form onSubmit={handleSubmit} className="space-y-6">
+                        <Input
+                            label="Display Name"
+                            type="text"
+                            value={displayName}
+                            onChange={(e) => setDisplayName(e.target.value)}
+                            placeholder="Your name"
+                            disabled={loading}
+                        />
 
-                        {/* Email */}
-                        <div className="mb-4">
-                            <label
-                                htmlFor="email"
-                                className="block text-sm font-medium text-slate-300 mb-2"
-                            >
-                                Email
-                            </label>
-                            <input
-                                id="email"
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
-                                placeholder="you@example.com"
-                                required
-                                disabled={loading}
-                            />
-                        </div>
+                        <Input
+                            label="Email"
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="you@example.com"
+                            required
+                            disabled={loading}
+                        />
 
-                        {/* Password */}
-                        <div className="mb-6">
-                            <label
-                                htmlFor="password"
-                                className="block text-sm font-medium text-slate-300 mb-2"
-                            >
-                                Password
-                            </label>
-                            <input
-                                id="password"
+                        <div>
+                            <Input
+                                label="Password"
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full px-4 py-3 bg-slate-900/50 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                                 placeholder="At least 8 characters"
                                 required
                                 disabled={loading}
                                 minLength={8}
                             />
-                            <p className="text-slate-500 text-xs mt-1">
+                            <p className="text-[var(--muted-30)] text-xs mt-1.5">
                                 Must be at least 8 characters
                             </p>
                         </div>
 
-                        {/* Error Message */}
                         {error && (
-                            <div className="mb-6 p-3 bg-red-500/10 border border-red-500/50 rounded-lg">
-                                <p className="text-red-400 text-sm">{error}</p>
+                            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg animate-fade-in">
+                                <p className="text-[var(--danger)] text-sm text-center">{error}</p>
                             </div>
                         )}
 
-                        {/* Submit Button */}
-                        <button
+                        <Button
                             type="submit"
-                            disabled={loading}
-                            className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors duration-200 shadow-lg hover:shadow-blue-500/50 mb-4"
+                            variant="primary"
+                            className="w-full"
+                            loading={loading}
                         >
-                            {loading ? 'Creating account...' : 'Create Account'}
-                        </button>
+                            Create Account
+                        </Button>
 
-                        {/* Login Link */}
-                        <p className="text-center text-slate-400 text-sm">
+                        <p className="text-center text-[var(--muted-30)] text-sm">
                             Already have an account?{' '}
                             <Link
                                 href="/login"
-                                className="text-blue-400 hover:text-blue-300 font-medium transition"
+                                className="text-[var(--primary-50)] hover:text-[var(--primary-40)] font-medium transition-colors"
                             >
                                 Sign in
                             </Link>
                         </p>
                     </form>
-                </div>
+                </Card>
             </div>
         </div>
     );

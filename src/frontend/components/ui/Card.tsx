@@ -10,10 +10,11 @@ import { ReactNode } from 'react';
 
 interface CardProps {
     children: ReactNode;
-    variant?: 'solid' | 'glass';
+    variant?: 'solid' | 'glass' | 'elevated';
     size?: 'sm' | 'md' | 'lg';
     className?: string;
     hover?: boolean;
+    glow?: boolean;
 }
 
 export function Card({
@@ -22,12 +23,14 @@ export function Card({
     size = 'md',
     className = '',
     hover = false,
+    glow = false,
 }: CardProps) {
-    const baseClasses = 'rounded-xl transition-all';
+    const baseClasses = 'rounded-[var(--radius-lg)] transition-all duration-300 relative overflow-hidden';
 
     const variantClasses = {
         solid: 'bg-[var(--surface-10)] border border-[var(--glass-border)]',
-        glass: 'bg-[var(--glass-01)] backdrop-blur-lg border border-[var(--glass-border)]',
+        glass: 'glass-panel',
+        elevated: 'glass-panel-elevated',
     };
 
     const sizeClasses = {
@@ -37,12 +40,16 @@ export function Card({
     };
 
     const hoverClasses = hover
-        ? 'hover:bg-[var(--surface-20)] hover:shadow-lg cursor-pointer'
+        ? 'hover:bg-[var(--surface-20)] hover:shadow-lg cursor-pointer hover:-translate-y-1'
+        : '';
+
+    const glowClasses = glow
+        ? 'before:absolute before:inset-0 before:bg-gradient-to-b before:from-[var(--glass-highlight)] before:to-transparent before:opacity-0 hover:before:opacity-100 before:transition-opacity before:duration-300'
         : '';
 
     return (
         <div
-            className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${hoverClasses} ${className}`}
+            className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${hoverClasses} ${glowClasses} ${className}`}
         >
             {children}
         </div>

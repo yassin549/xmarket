@@ -33,65 +33,42 @@ export default function Home() {
       </section>
 
       {/* Features Section */}
-      <section id="how-it-works" className="py-24 px-6 lg:px-8 bg-zinc-50 dark:bg-zinc-900/50">
-        <div className="max-w-7xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-16">The Three-Chart System</h2>
-
-          <div className="grid md:grid-cols-3 gap-12">
-            {/* Reality Chart */}
-            <div className="bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800">
-              <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center text-2xl mb-6">
-                🌍
-              </div>
-              <h3 className="text-xl font-semibold mb-3">Reality Chart</h3>
-              <p className="text-zinc-600 dark:text-zinc-400">
-                Driven by AI analysis of real-world data sources. It represents the objective "truth" of an event's probability or value.
-              </p>
-            </div>
-
-            {/* Market Chart */}
-            <div className="bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800">
-              <div className="w-12 h-12 bg-green-100 dark:bg-green-900/30 rounded-xl flex items-center justify-center text-2xl mb-6">
-                📊
-              </div>
-              <h3 className="text-xl font-semibold mb-3">Market Chart</h3>
-              <p className="text-zinc-600 dark:text-zinc-400">
-                Driven by user supply and demand in the orderbook. It reflects the crowd's sentiment and speculation.
-              </p>
-            </div>
-
-            {/* Trading Chart */}
-            <div className="bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-sm border border-zinc-200 dark:border-zinc-800">
-              <div className="w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-xl flex items-center justify-center text-2xl mb-6">
-                📈
-              </div>
-              <h3 className="text-xl font-semibold mb-3">Trading Chart</h3>
-              <p className="text-zinc-600 dark:text-zinc-400">
-                The blended price where trades actually execute. It converges Reality and Market values to ensure fair pricing.
-              </p>
-            </div>
+      <section className="py-24 bg-[var(--bg-05)]">
+        <div className="container mx-auto px-6">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">Why Xmarket?</h2>
+            <p className="text-[var(--muted-20)] max-w-xl mx-auto">
+              Built for sophisticated traders who want exposure to the real world.
+            </p>
           </div>
-        </div>
-      </section>
 
-      {/* Categories Section */}
-      <section className="py-24 px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <h2 className="text-3xl font-bold text-center mb-16">Explore Markets</h2>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {(Object.entries(MARKET_TYPE_INFO) as [MarketType, typeof MARKET_TYPE_INFO[MarketType]][]).map(([type, info]) => (
-              <Link
-                key={type}
-                href={`/discover?type=${type}`}
-                className="group p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-indigo-500 dark:hover:border-indigo-500 transition-all hover:shadow-md bg-white dark:bg-zinc-900"
-              >
-                <div className="text-3xl mb-4 group-transform group-hover:scale-110 transition-transform duration-300">
-                  {info.icon}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {[
+              {
+                title: "Real-World Assets",
+                description: "Trade directly on political polls, economic data, and global events.",
+                icon: "🌍"
+              },
+              {
+                title: "Three-Chart System",
+                description: "Advanced visualization tools to analyze trends and make informed decisions.",
+                icon: "📊"
+              },
+              {
+                title: "Instant Settlement",
+                description: "Lightning fast execution and settlement on our high-performance engine.",
+                icon: "⚡"
+              }
+            ].map((feature, i) => (
+              <div key={i} className="card group hover:-translate-y-2 transition-transform duration-300">
+                <div className="w-12 h-12 bg-[var(--surface-20)] rounded-lg flex items-center justify-center text-2xl mb-4 group-hover:scale-110 transition-transform">
+                  {feature.icon}
                 </div>
-                <h3 className="font-semibold text-lg mb-1">{info.label}</h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">{info.description}</p>
-              </Link>
+                <h3 className="text-xl font-bold mb-2">{feature.title}</h3>
+                <p className="text-[var(--muted-30)]">
+                  {feature.description}
+                </p>
+              </div>
             ))}
           </div>
         </div>

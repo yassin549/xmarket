@@ -3,87 +3,50 @@
 /**
  * Ticker Component
  * 
- * Scrolling ticker strip for displaying live market data.
+ * Displays a scrolling ticker of market data.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
+import { Market } from '@/types/market';
 
-interface TickerItem {
-    symbol: string;
-    shortLabel: string;
-    changePct: number;
-    state: 'up' | 'down' | 'neutral';
-}
-
-interface TickerProps {
-    items: TickerItem[];
-    speed?: number; // pixels per second
-}
-
-export function Ticker({ items, speed = 50 }: TickerProps) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const scrollRef = useRef<HTMLDivElement>(null);
+export function Ticker() {
+    const [markets, setMarkets] = useState<Market[]>([]);
 
     useEffect(() => {
-        const container = containerRef.current;
-        const scroll = scrollRef.current;
-        if (!container || !scroll) return;
+        // Fetch initial markets for ticker
+        fetch('/api/markets?limit=10')
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    setMarkets(data.markets);
+                }
+            })
+            .catch(err => console.error('Failed to fetch ticker data', err));
+    }, []);
 
-        let animationId: number;
-        let scrollPosition = 0;
-        const scrollWidth = scroll.scrollWidth / 2; // We duplicate items, so divide by 2
-
-        const animate = () => {
-            scrollPosition += speed / 60; // 60fps
-            if (scrollPosition >= scrollWidth) {
-                scrollPosition = 0;
-            }
-            if (scroll) {
-                scroll.style.transform = `translateX(-${scrollPosition}px)`;
-            }
-            animationId = requestAnimationFrame(animate);
-        };
-
-        animate();
-
-        return () => cancelAnimationFrame(animationId);
-    }, [items, speed]);
-
-    // Duplicate items for seamless loop
-    const duplicatedItems = [...items, ...items];
+    if (markets.length === 0) return null;
 
     return (
-        <div
-            ref={containerRef}
-            className="overflow-hidden bg-[var(--surface-10)] border-y border-[var(--glass-border)] py-2"
-        >
-            <div ref={scrollRef} className="flex gap-8 whitespace-nowrap">
-                {duplicatedItems.map((item, index) => (
-                    <div
-                        key={`${item.symbol}-${index}`}
-                        className="inline-flex items-center gap-2 px-4"
-                    >
-                        <span className="font-semibold text-[var(--text-10)]">
-                            {item.symbol}
-                        </span>
-                        <span className="text-sm text-[var(--muted-20)]">
-                            {item.shortLabel}
-                        </span>
-                        <span
-                            className={`text-sm font-medium ${item.state === 'up'
-                                    ? 'text-[var(--success)]'
-                                    : item.state === 'down'
-                                        ? 'text-[var(--danger)]'
-                                        : 'text-[var(--muted-20)]'
-                                }`}
-                        >
-                            {item.state === 'up' && '▲'}
-                            {item.state === 'down' && '▼'}
-                            {item.changePct.toFixed(2)}%
-                        </span>
+        <div className="w-full bg-[var(--surface-10)] border-y border-[var(--glass-border)] overflow-hidden py-3">
+            <div className="flex animate-scroll whitespace-nowrap">
+                {[...markets, ...markets].map((market, i) => (
+                    <div key={`${market.symbol}-${i}`} className="flex items-center gap-4 mx-8">
+                        <span className="font-bold text-[var(--text-10)]">{market.symbol}</span>
+                        <span className="text-sm text-[var(--muted-20)]">{market.title}</span>
+                        {/* Placeholder for price change - would come from realtime data */}
+                        <span className="text-sm text-[var(--success)]">+2.4%</span>
                     </div>
                 ))}
             </div>
+            <style jsx>{`
+                .animate-scroll {
+                    animation: scroll 30s linear infinite;
+                }
+                @keyframes scroll {
+                    0% { transform: translateX(0); }
+                    100% { transform: translateX(-50%); }
+                }
+            `}</style>
         </div>
     );
 }

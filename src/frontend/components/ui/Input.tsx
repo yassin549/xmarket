@@ -3,7 +3,7 @@
 /**
  * Input Component
  * 
- * Reusable input field with validation states.
+ * Reusable input field with label and error state.
  */
 
 import { InputHTMLAttributes, forwardRef } from 'react';
@@ -11,42 +11,35 @@ import { InputHTMLAttributes, forwardRef } from 'react';
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
     label?: string;
     error?: string;
-    helperText?: string;
+    icon?: React.ReactNode;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-    ({ label, error, helperText, className = '', ...props }, ref) => {
+    ({ label, error, icon, className = '', ...props }, ref) => {
         return (
             <div className="w-full">
                 {label && (
-                    <label className="block text-sm font-medium text-[var(--text-20)] mb-2">
+                    <label className="block text-sm font-medium text-[var(--text-20)] mb-1.5">
                         {label}
                     </label>
                 )}
-                <input
-                    ref={ref}
-                    className={`
-            w-full px-4 py-3 
-            bg-[var(--surface-10)] 
-            border ${error ? 'border-[var(--danger)]' : 'border-[var(--glass-border)]'}
-            rounded-lg 
-            text-[var(--text-10)] 
-            placeholder-[var(--muted-30)]
-            focus:outline-none 
-            focus:ring-2 
-            ${error ? 'focus:ring-[var(--danger)]' : 'focus:ring-[var(--primary-50)]'}
-            focus:border-transparent
-            transition-all
-            disabled:opacity-50 disabled:cursor-not-allowed
-            ${className}
-          `}
-                    {...props}
-                />
+                <div className="relative">
+                    {icon && (
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[var(--muted-30)]">
+                            {icon}
+                        </div>
+                    )}
+                    <input
+                        ref={ref}
+                        className={`input ${icon ? 'pl-10' : ''} ${error ? 'border-[var(--danger)] focus:border-[var(--danger)] focus:ring-[var(--danger)]' : ''
+                            } ${className}`}
+                        {...props}
+                    />
+                </div>
                 {error && (
-                    <p className="mt-1 text-sm text-[var(--danger)]">{error}</p>
-                )}
-                {helperText && !error && (
-                    <p className="mt-1 text-sm text-[var(--muted-30)]">{helperText}</p>
+                    <p className="mt-1 text-sm text-[var(--danger)] animate-fade-in">
+                        {error}
+                    </p>
                 )}
             </div>
         );
