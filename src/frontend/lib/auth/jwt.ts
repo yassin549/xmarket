@@ -9,10 +9,6 @@ import jwt from 'jsonwebtoken';
 
 const SECRET = process.env.NEXTAUTH_SECRET;
 
-if (!SECRET) {
-    throw new Error('NEXTAUTH_SECRET environment variable is not set');
-}
-
 export interface JWTPayload {
     user_id: string;
     email: string;
@@ -32,7 +28,10 @@ export function generateToken(
     payload: Omit<JWTPayload, 'exp' | 'iat'>,
     expiresIn: string = '7d'
 ): string {
-    return jwt.sign(payload, SECRET!, {
+    if (!SECRET) {
+        throw new Error('NEXTAUTH_SECRET environment variable is not set');
+    }
+    return jwt.sign(payload, SECRET, {
         expiresIn: expiresIn,
         algorithm: 'HS256',
     } as jwt.SignOptions);
@@ -44,8 +43,11 @@ export function generateToken(
  * @returns Decoded payload or null if invalid
  */
 export function verifyToken(token: string): JWTPayload | null {
+    if (!SECRET) {
+        return null;
+    }
     try {
-        const decoded = jwt.verify(token, SECRET!, {
+        const decoded = jwt.verify(token, SECRET, {
             algorithms: ['HS256'],
         }) as JWTPayload;
         return decoded;

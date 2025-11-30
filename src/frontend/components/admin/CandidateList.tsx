@@ -1,3 +1,5 @@
+'use client';
+
 import CandidateCard from './CandidateCard';
 
 interface Candidate {

@@ -1,3 +1,5 @@
+'use client';
+
 interface Candidate {
     candidate_id: string;
     snapshot_id: string;

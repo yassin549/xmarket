@@ -38,15 +38,7 @@ export function Ticker() {
                     </div>
                 ))}
             </div>
-            <style jsx>{`
-                .animate-scroll {
-                    animation: scroll 30s linear infinite;
-                }
-                @keyframes scroll {
-                    0% { transform: translateX(0); }
-                    100% { transform: translateX(-50%); }
-                }
-            `}</style>
+
         </div>
     );
 }
