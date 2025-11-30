@@ -35,11 +35,23 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        return NextResponse.json({
+        // Create response
+        const response = NextResponse.json({
             success: true,
             token: result.token,
             message: 'Admin authentication successful',
         });
+
+        // Set HttpOnly cookie
+        response.cookies.set('auth_token', result.token!, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            maxAge: 60 * 60 * 24, // 24 hours for admin
+            path: '/',
+        });
+
+        return response;
     } catch (error) {
         console.error('Admin auth error:', error);
         return NextResponse.json(

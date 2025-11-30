@@ -36,10 +36,8 @@ export default function AdminLoginPage() {
                 return;
             }
 
-            // Store token in localStorage
-            localStorage.setItem('auth_token', data.token);
-
-            // Redirect to admin dashboard
+            // Cookie is automatically set by the API
+            // Just redirect to admin dashboard
             router.push('/admin');
         } catch (err) {
             setError('An error occurred. Please try again.');

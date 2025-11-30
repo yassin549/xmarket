@@ -78,7 +78,8 @@ export async function POST(request: NextRequest) {
                 display_name: user.display_name,
             });
 
-            return NextResponse.json({
+            // Create response
+            const response = NextResponse.json({
                 success: true,
                 token,
                 user: {
@@ -88,6 +89,17 @@ export async function POST(request: NextRequest) {
                     display_name: user.display_name,
                 },
             });
+
+            // Set HttpOnly cookie
+            response.cookies.set('auth_token', token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                maxAge: 60 * 60 * 24 * 7, // 7 days
+                path: '/',
+            });
+
+            return response;
         } catch (dbError: any) {
             // Check for unique constraint violation (email already exists)
             if (dbError.code === '23505') {

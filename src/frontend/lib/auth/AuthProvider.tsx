@@ -37,23 +37,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const refreshUser = async () => {
-        const token = localStorage.getItem('auth_token');
-        if (!token) {
-            setLoading(false);
-            return;
-        }
-
         try {
             const response = await fetch('/api/auth/me', {
-                headers: { Authorization: `Bearer ${token}` },
+                credentials: 'include', // Important: include cookies
             });
 
             if (response.ok) {
                 const data = await response.json();
                 setUser(data.user);
             } else {
-                // Token is invalid
-                localStorage.removeItem('auth_token');
                 setUser(null);
             }
         } catch (error) {
@@ -64,12 +56,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const login = async (token: string) => {
-        localStorage.setItem('auth_token', token);
+        // Token is already set as cookie by the API
+        // Just refresh the user state
         await refreshUser();
     };
 
-    const logout = () => {
-        localStorage.removeItem('auth_token');
+    const logout = async () => {
+        // Call logout endpoint to clear cookie
+        try {
+            await fetch('/api/auth/logout', { method: 'POST' });
+        } catch (error) {
+            console.error('Logout error:', error);
+        }
+
         setUser(null);
         router.push('/');
     };
