@@ -27,8 +27,10 @@ export default function LoginPage() {
         e.preventDefault();
         setError('');
         setLoading(true);
+        console.log('[Login] Starting login process...');
 
         try {
+            console.log('[Login] Fetching /api/auth/login...');
             const response = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -36,20 +38,28 @@ export default function LoginPage() {
             });
 
             const data = await response.json();
+            console.log('[Login] Response received:', { success: data.success, hasToken: !!data.token, hasUser: !!data.user });
 
             if (!response.ok || !data.success) {
+                console.error('[Login] Login failed:', data.error);
                 setError(data.error || 'Login failed');
                 setLoading(false);
                 return;
             }
 
+            console.log('[Login] Calling AuthProvider.login()...');
             // Use AuthProvider login method with user data from response
             await login(data.token, data.user);
+            console.log('[Login] AuthProvider.login() completed, user set');
 
             // Redirect to dashboard
+            console.log('[Login] Attempting redirect to /dashboard...');
             router.push('/dashboard');
+            console.log('[Login] router.push() called');
+
+            // Note: Loading state will be reset when page changes or by component unmount
         } catch (err) {
-            console.error('Login error:', err);
+            console.error('[Login] Login error:', err);
             setError('An error occurred. Please try again.');
             setLoading(false);
         }
