@@ -32,7 +32,7 @@ export function middleware(request: NextRequest) {
     let session = null;
     if (token) {
         try {
-            session = verifyToken(token);
+            session = await verifyToken(token);
             console.log('[Middleware] Session verified:', {
                 user_id: session?.user_id,
                 email: session?.email,

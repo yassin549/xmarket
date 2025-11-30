@@ -43,7 +43,7 @@ export async function getSession(request: NextRequest): Promise<UserSession | nu
         return null;
     }
 
-    const payload = verifyToken(token);
+    const payload = await verifyToken(token);
 
     if (!payload) {
         return null;

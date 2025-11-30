@@ -6,6 +6,7 @@
  */
 
 import jwt from 'jsonwebtoken';
+import { jwtVerify } from 'jose';
 
 const SECRET = process.env.NEXTAUTH_SECRET;
 
@@ -42,15 +43,16 @@ export function generateToken(
  * @param token JWT token string
  * @returns Decoded payload or null if invalid
  */
-export function verifyToken(token: string): JWTPayload | null {
+export async function verifyToken(token: string): Promise<JWTPayload | null> {
     if (!SECRET) {
         return null;
     }
     try {
-        const decoded = jwt.verify(token, SECRET, {
-            algorithms: ['HS256'],
-        }) as JWTPayload;
-        return decoded;
+        const { payload } = await jwtVerify(
+            token,
+            new TextEncoder().encode(SECRET)
+        );
+        return payload as unknown as JWTPayload;
     } catch (error) {
         // Token is invalid or expired
         return null;
