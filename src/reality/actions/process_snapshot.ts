@@ -89,7 +89,49 @@ export class ProcessSnapshotExecutor implements JobExecutor {
             return { status: 'extraction_failed', error: String(error) };
         }
 
-        // 4. Dedupe & Persist Candidate Event
+
+        // 4. Calculate Impact Score (LLM-based)
+        let impactScore = 0;
+        let impactConfidence = 0;
+        let llmReasoning = '';
+        let status = 'pending';  // Default status
+
+        try {
+            // Import scorer dynamically to avoid circular deps
+            const { calculateImpactScore } = await import('../scorers/impact_scorer');
+
+            const scoreResult = await calculateImpactScore(
+                contentText,
+                title || 'Unknown Variable',
+                url  // Use URL as description for now
+            );
+
+            impactScore = scoreResult.score;
+            impactConfidence = scoreResult.confidence;
+            llmReasoning = scoreResult.reasoning;
+
+            // Auto-approval logic
+            const APPROVAL_CRITERIA = {
+                MIN_SCORE: Number(process.env.APPROVAL_MIN_SCORE) || 65,
+                MIN_CONFIDENCE: Number(process.env.APPROVAL_MIN_CONFIDENCE) || 0.80
+            };
+
+            if (impactScore >= APPROVAL_CRITERIA.MIN_SCORE &&
+                impactConfidence >= APPROVAL_CRITERIA.MIN_CONFIDENCE) {
+                status = 'approved';
+                console.log(`Auto-approved: score=${impactScore}, confidence=${impactConfidence}`);
+            } else {
+                status = 'pending';
+                console.log(`Pending review: score=${impactScore}, confidence=${impactConfidence}`);
+            }
+
+        } catch (scoringError) {
+            console.error('Impact scoring failed:', scoringError);
+            status = 'failed';
+            llmReasoning = scoringError instanceof Error ? scoringError.message : 'Scoring failed';
+        }
+
+        // 5. Dedupe & Persist Candidate Event
         const dedupeHash = crypto
             .createHash('sha256')
             .update(extraction.summary + snapshot_id)
@@ -106,11 +148,11 @@ export class ProcessSnapshotExecutor implements JobExecutor {
             return { status: 'skipped_duplicate', candidate_id: existing.rows[0].candidate_id };
         }
 
-        // Insert
+        // Insert with all calculated data
         const insertResult = await query(
             `INSERT INTO candidate_events 
-       (snapshot_id, summary, confidence, metadata, dedupe_hash, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')
+       (snapshot_id, summary, confidence, metadata, dedupe_hash, status, impact_score, llm_reasoning, variable_name, variable_description)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING candidate_id`,
             [
                 snapshot_id,
@@ -118,19 +160,27 @@ export class ProcessSnapshotExecutor implements JobExecutor {
                 extraction.confidence,
                 JSON.stringify({
                     sources: extraction.sources,
-                    llm_version: extraction.schema_version
+                    llm_version: extraction.schema_version,
+                    impact_confidence: impactConfidence
                 }),
-                dedupeHash
+                dedupeHash,
+                status,
+                impactScore,
+                llmReasoning,
+                title || 'Unknown Variable',
+                url
             ]
         );
 
         const candidateId = insertResult.rows[0].candidate_id;
-        console.log(`Created candidate event: ${candidateId}`);
+        console.log(`Created candidate event: ${candidateId} [${status}]`);
 
         return {
             status: 'success',
             candidate_id: candidateId,
-            summary: extraction.summary
+            summary: extraction.summary,
+            impact_score: impactScore,
+            auto_approved: status === 'approved'
         };
     }
 }
