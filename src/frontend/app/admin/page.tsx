@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import CandidateList from '@/components/admin/CandidateList';
 
 interface Candidate {
@@ -14,6 +15,7 @@ interface Candidate {
 }
 
 export default function AdminDashboard() {
+    const router = useRouter();
     const [candidates, setCandidates] = useState<Candidate[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -74,7 +76,22 @@ export default function AdminDashboard() {
             <div className="max-w-4xl mx-auto px-4">
                 <div className="mb-8">
                     <h1 className="text-3xl font-bold text-gray-900">Admin Dashboard</h1>
-                    <p className="text-gray-600 mt-2">Review and approve candidate events</p>
+                    <p className="text-gray-600 mt-2">Manage stocks and review candidate events</p>
+                </div>
+
+                {/* Navigation Tabs */}
+                <div className="mb-6 flex gap-2 border-b border-gray-200">
+                    <button
+                        onClick={() => router.push('/admin/stocks')}
+                        className="px-6 py-3 font-medium text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-t-lg"
+                    >
+                        📊 Stock Management
+                    </button>
+                    <button
+                        className="px-6 py-3 font-medium text-gray-700 bg-white border-b-2 border-blue-600 rounded-t-lg"
+                    >
+                        ✅ Candidate Events
+                    </button>
                 </div>
 
                 {loading && (
