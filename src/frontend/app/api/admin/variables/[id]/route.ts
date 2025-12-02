@@ -44,10 +44,12 @@ function validateURL(url: string): boolean {
  */
 export async function GET(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         // TODO: Add admin authentication
+
+        const { id } = await params;
 
         const result = await query(
             `SELECT 
@@ -70,7 +72,7 @@ export async function GET(
         last_reality_update
       FROM variables
       WHERE variable_id = $1`,
-            [params.id]
+            [id]
         );
 
         if (result.rows.length === 0) {
@@ -110,11 +112,12 @@ export async function GET(
  */
 export async function PUT(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         // TODO: Add admin authentication
 
+        const { id } = await params;
         const body: UpdateVariableRequest = await request.json();
 
         // Validate category if provided
@@ -221,7 +224,7 @@ export async function PUT(
         updates.push(`updated_at = NOW()`);
 
         // Add variable_id as last parameter
-        values.push(params.id);
+        values.push(id);
 
         const sql = `
       UPDATE variables
@@ -285,17 +288,19 @@ export async function PUT(
  */
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         // TODO: Add admin authentication
+
+        const { id } = await params;
 
         const result = await query(
             `UPDATE variables
        SET status = 'delisted', is_tradeable = false, updated_at = NOW()
        WHERE variable_id = $1
        RETURNING symbol`,
-            [params.id]
+            [id]
         );
 
         if (result.rows.length === 0) {
