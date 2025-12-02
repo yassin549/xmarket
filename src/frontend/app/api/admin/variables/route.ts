@@ -66,12 +66,23 @@ export async function GET(request: NextRequest) {
 
         const result = await query(sql, params);
 
-        // Parse JSONB fields
+        // Safe JSON parsing helper
+        const safeParseJSON = (value: any, fallback: any = []) => {
+            if (!value) return fallback;
+            if (typeof value === 'object') return value; // Already parsed
+            try {
+                return JSON.parse(value);
+            } catch {
+                return fallback;
+            }
+        };
+
+        // Parse JSONB fields safely
         const variables = result.rows.map(row => ({
             ...row,
-            tags: JSON.parse(row.tags || '[]'),
-            reality_sources: JSON.parse(row.reality_sources || '[]'),
-            impact_keywords: JSON.parse(row.impact_keywords || '[]')
+            tags: safeParseJSON(row.tags, []),
+            reality_sources: safeParseJSON(row.reality_sources, []),
+            impact_keywords: safeParseJSON(row.impact_keywords, [])
         }));
 
         return NextResponse.json({
