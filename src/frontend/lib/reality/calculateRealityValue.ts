@@ -5,7 +5,7 @@
  * This is the heart of the reality engine.
  */
 
-import { query } from '@/lib/infra/db/pool';
+import { query } from '../infra/db/pool';
 import { scrapeMultipleSources, type ScrapedContent } from './scraper';
 import { analyzeMultipleSources, type ImpactAnalysis } from './llmAnalyzer';
 
@@ -18,6 +18,7 @@ interface Variable {
     impact_keywords: string[];
     llm_context?: string;
     reality_value: number | null;
+    market_value: number | null;
     initial_value: number;
 }
 
@@ -91,10 +92,17 @@ export async function updateRealityValue(
 
     console.log(`[Reality Engine] Value change: ${currentValue.toFixed(2)} → ${newValue.toFixed(2)}`);
 
-    // 7. Update variable in database
-    await updateVariableRealityValue(variable.variable_id, newValue);
+    // 7. Calculate trading value (blended)
+    const marketValue = variable.market_value || variable.initial_value; // Fallback to initial if no market value
+    const tradingValue = (newValue + marketValue) / 2;
 
-    // 8. Return result
+    // 8. Update variable in database
+    await updateVariableRealityValue(variable.variable_id, newValue, tradingValue);
+
+    // 9. Save history snapshot
+    await saveHistorySnapshot(variable.variable_id, newValue, marketValue, tradingValue);
+
+    // 10. Return result
     const change = newValue - currentValue;
     const changePercent = (change / currentValue) * 100;
 
@@ -117,12 +125,6 @@ export async function updateRealityValue(
  * Calculate new value based on current value and impact score
  * 
  * Formula: newValue = currentValue * (1 + impactScore / 100)
- * 
- * Examples:
- * - Impact +10: value increases by 10%
- * - Impact -10: value decreases by 10%
- * - Impact +100: value doubles
- * - Impact -100: value goes to 0
  */
 function calculateNewValue(currentValue: number, impactScore: number): number {
     const multiplier = 1 + (impactScore / 100);
@@ -146,6 +148,7 @@ async function getVariable(variableId: string): Promise<Variable | null> {
       impact_keywords,
       llm_context,
       reality_value,
+      market_value,
       initial_value
     FROM variables
     WHERE variable_id = $1 AND status = 'active' AND is_tradeable = true`,
@@ -231,21 +234,45 @@ async function saveLLMAnalyses(
  */
 async function updateVariableRealityValue(
     variableId: string,
-    newValue: number
+    newValue: number,
+    tradingValue: number
 ): Promise<void> {
     await query(
         `UPDATE variables
     SET 
       reality_value = $1,
+      trading_value = $2,
       last_reality_update = NOW(),
       updated_at = NOW()
-    WHERE variable_id = $2`,
-        [newValue, variableId]
+    WHERE variable_id = $3`,
+        [newValue, tradingValue, variableId]
+    );
+}
+
+/**
+ * Save history snapshot for charts
+ */
+async function saveHistorySnapshot(
+    variableId: string,
+    realityValue: number,
+    marketValue: number,
+    tradingValue: number
+): Promise<void> {
+    await query(
+        `INSERT INTO historical_values (
+            variable_id,
+            reality_value,
+            market_value,
+            trading_value,
+            snapshot_type
+        ) VALUES ($1, $2, $3, $4, 'scheduled')`,
+        [variableId, realityValue, marketValue, tradingValue]
     );
 }
 
 /**
  * Update all active variables (called by cron)
+ * Uses concurrency limit to avoid overwhelming resources
  */
 export async function updateAllVariables(): Promise<RealityUpdateResult[]> {
     console.log('[Reality Engine] Starting update for all variables...');
@@ -261,23 +288,46 @@ export async function updateAllVariables(): Promise<RealityUpdateResult[]> {
     const variables = result.rows;
     console.log(`[Reality Engine] Found ${variables.length} variables to update`);
 
-    const results: RealityUpdateResult[] = [];
+    const CONCURRENCY_LIMIT = 5;
 
-    // Update each variable sequentially (to avoid rate limits)
-    for (const variable of variables) {
+    // Helper for concurrency control
+    const runWithLimit = async <T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> => {
+        const results: T[] = [];
+        const executing: Promise<void>[] = [];
+
+        for (const task of tasks) {
+            const p = task().then(result => {
+                results.push(result);
+            });
+
+            executing.push(p);
+
+            if (executing.length >= limit) {
+                await Promise.race(executing);
+            }
+        }
+
+        await Promise.all(executing);
+        return results;
+    };
+
+    // Create safe tasks that won't crash the batch
+    const safeTasks = variables.map(variable => async () => {
         try {
-            const result = await updateRealityValue(variable.variable_id);
-            results.push(result);
-
-            // Small delay between variables to respect rate limits
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
+            return await updateRealityValue(variable.variable_id);
         } catch (error) {
             console.error(`[Reality Engine] Failed to update ${variable.symbol}:`, error);
+            return null;
         }
-    }
+    });
 
-    console.log(`[Reality Engine] Completed update for ${results.length}/${variables.length} variables`);
+    // Execute with concurrency limit
+    const rawResults = await runWithLimit(safeTasks, CONCURRENCY_LIMIT);
 
-    return results;
+    // Filter out failures
+    const successfulResults = rawResults.filter((r): r is RealityUpdateResult => r !== null);
+
+    console.log(`[Reality Engine] Completed update for ${successfulResults.length}/${variables.length} variables`);
+
+    return successfulResults;
 }
