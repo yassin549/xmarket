@@ -15,7 +15,7 @@ interface Variable {
     name: string;
     category: string;
     status: string;
-    reality_value: number;
+    reality_value: number | string | null;
     last_reality_update: string | null;
     created_at: string;
 }
@@ -65,7 +65,18 @@ export default function StocksManagementPage() {
 
     const formatDate = (dateStr: string | null) => {
         if (!dateStr) return 'Never';
-        return new Date(dateStr).toLocaleString();
+        try {
+            return new Date(dateStr).toLocaleString();
+        } catch {
+            return 'Invalid date';
+        }
+    };
+
+    const formatRealityValue = (value: number | string | null) => {
+        if (value === null || value === undefined) return 'N/A';
+        const numValue = typeof value === 'number' ? value : parseFloat(String(value));
+        if (isNaN(numValue)) return 'N/A';
+        return `$${numValue.toFixed(2)}`;
     };
 
     return (
@@ -195,7 +206,7 @@ export default function StocksManagementPage() {
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <span className="font-semibold text-gray-900">
-                                                    ${variable.reality_value?.toFixed(2) || 'N/A'}
+                                                    {formatRealityValue(variable.reality_value)}
                                                 </span>
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
