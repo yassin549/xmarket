@@ -7,6 +7,7 @@
 
 import { JobWorker } from '../infra/jobs/worker';
 import ProcessSnapshotExecutor from './actions/process_snapshot';
+import DiscoverEventsExecutor from './actions/discover_events';
 import * as dotenv from 'dotenv';
 import path from 'path';
 
@@ -24,6 +25,7 @@ async function startWorker() {
 
     // Register Executors
     worker.registerExecutor('process_snapshot', new ProcessSnapshotExecutor());
+    worker.registerExecutor('discover_events', new DiscoverEventsExecutor());
 
     // Start processing
     await worker.start();
